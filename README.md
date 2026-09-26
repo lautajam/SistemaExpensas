@@ -124,7 +124,7 @@ SistemaExpensas/
 ├── plantilla/              Diseño del recibo (editable)
 │   ├── recibo.html         Plantilla única del recibo
 │   ├── estilo.css          Colores, tipografías y disposición
-│   ├── marco.png           Marco violeta de la hoja (fondo de la página)
+│   ├── marco.png           Marco azul de la hoja (fondo de la página)
 │   └── fonts/              Tipografía Open Sans (licencia OFL)
 │
 ├── datos/                  Se crea al iniciar
@@ -395,7 +395,7 @@ También permite cargar el **logo** y la **firma digital** (PNG o JPG, con vista
 previa) y quitarlos. Se guardan como `configuracion/logo.png` y
 `configuracion/firma.png`, se incluyen en la copia de seguridad y se reducen
 a 1200 px si son muy grandes. El **logo** se imprime arriba a la derecha del
-recibo y la **firma** sobre la línea «Firma / Aclaración»; si no hay imagen
+recibo y la **firma** sobre la línea «Firma»; si no hay imagen
 cargada, ese lugar queda en blanco.
 
 ### Editor de datos (CSV)
@@ -472,7 +472,7 @@ recibo_expensas_Edificio_Alsina_123_1_A_SEPTIEMBRE_00039.pdf    (nuevo)
 ## 12. Plantilla del recibo
 
 Hay **una única plantilla** para todos los tipos de unidad (departamento, local,
-cochera y baulera). El recibo es una hoja A4 con marco violeta, generada a partir
+cochera y baulera). El recibo es una hoja A4 con marco azul, generada a partir
 de archivos de texto plano, sin tocar código Python:
 
 | Archivo | Contenido |
@@ -481,7 +481,6 @@ de archivos de texto plano, sin tocar código Python:
 | `plantilla/estilo.css` | Colores, tipografías, tamaños y disposición |
 | `plantilla/marco.png` | Marco de la hoja (imagen de fondo de la página, A4) |
 | `plantilla/fonts/` | Tipografía Open Sans (regular y negrita) |
-| `plantilla/EXPENSA_PLANTILLA.png` | Imagen de referencia del diseño (no se usa al generar) |
 
 ### Qué va en cada lugar
 
@@ -501,7 +500,7 @@ sistema; el resto es texto fijo.
 | Frase sobre el importe | Depende del estado de pago (ver abajo) |
 | Importe abonado | **Importe** sin decimales si es entero (`$67.000.-`) o con coma (`$67.000,50.-`); en un grupo que paga junto, el total sumado |
 | (Pesos …) | El **importe en letras** (`SESENTA Y SIETE MIL`, con centavos `… CON 50/100`) |
-| Firma / Aclaración | La **firma digital** de la inmobiliaria sobre la línea |
+| Firma | La **firma digital** de la inmobiliaria sobre la línea |
 | Pie | **Administrador** del consorcio (nombre, CUIT, RPAC) y **teléfono** y **correo** de la inmobiliaria |
 
 Los textos largos (nombres, direcciones, unidades) reducen automáticamente su
@@ -546,7 +545,7 @@ espaciados. No hace falta recompilar: basta con generar un recibo de prueba.
 > 2.1. Funciona con `table`, bordes, colores y tipografías, pero **no con
 > `flexbox` ni `grid`**; los rediseños deben basarse en tablas. Además, no
 > conviene fijar alturas grandes en celdas de tabla: `xhtml2pdf` achica todo el
-> contenido si no entra. El marco violeta es la imagen `marco.png`; para
+> contenido si no entra. El marco azul es la imagen `marco.png`; para
 > cambiar su color o grosor hay que reemplazarla por otra imagen A4.
 
 ## 13. Modelo de datos

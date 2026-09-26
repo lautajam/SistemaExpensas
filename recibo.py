@@ -18,7 +18,7 @@ Qué va en cada lugar del recibo (lo que varía en cada recibo sale de un marcad
     Recibí de              {RECIBI_DE}.-
     Frase                  {FRASE_PAGO}
     Importe                Importe abonado: ${IMPORTE}.-      (Pesos {IMPORTE_LETRAS})
-    Firma                  {FIRMA} sobre la línea «Firma / Aclaración»
+    Firma                  {FIRMA} sobre la línea «Firma»
     Pie                    {ADMIN_NOMBRE} | C.U.I.T.: {ADMIN_CUIT} | RPAC: {ADMIN_RPAC}
                            Tel: {INMOBILIARIA_TELEFONO} | Email: {INMOBILIARIA_EMAIL}
 """

@@ -5,11 +5,11 @@
 
     IMPORTANTE: el PDF se genera con la libreria "xhtml2pdf", que soporta un
     subconjunto de CSS 2.1 (NO soporta flexbox ni grid). Por eso el diseño se
-    resuelve con tablas y bloques. El marco violeta de la hoja es la imagen
+    resuelve con tablas y bloques. El marco azul de la hoja es la imagen
     marco.png (fondo de la pagina). Colores del diseño:
         negro (todo el texto)   #000000
         azul (encabezado tabla) #1800ad
-        violeta (marco)         #482c97
+        azul (marco de la hoja)  #1800ad
     Tipografia: Open Sans (plantilla/fonts, licencia OFL). pdf_generator.py la
     registra con los nombres opensans (normal) y opensansbold (negrita): en el
     CSS se usa font-family: opensans con font-weight: bold.
@@ -49,8 +49,8 @@ p.inmo      { font-size: 12.5pt; line-height: 17pt; text-align: center; margin-t
 p.subinmo   { font-size: 11.5pt; line-height: 16pt; text-align: center; margin-top: 1pt; }
 
 table.linea1 { width: 100%; margin-top: 9pt; }
-table.linea1 td { border-top: 3.4pt solid #000000; font-size: 1pt; line-height: 1pt; height: 1pt; }
-table.linea2 { width: 100%; margin-top: 2pt; }
+table.linea1 td { border-top: 2.4pt solid #000000; font-size: 1pt; line-height: 1pt; height: 1pt; }
+table.linea2 { width: 100%; margin-top: 3pt; }
 table.linea2 td { border-top: 1.4pt solid #000000; font-size: 1pt; line-height: 1pt; height: 1pt; }
 
 /* ---------- Titulos ---------- */
@@ -69,6 +69,10 @@ table.unidad th {
     text-align: center; border: 0.8pt solid #1800ad; vertical-align: middle;
     padding-top: 5.9pt; padding-bottom: 5.9pt;
 }
+/* barras blancas entre los cuadros del encabezado (como las lineas negras de la fila de abajo) */
+table.unidad th.th1 { border-right: 2pt solid #ffffff; }
+table.unidad th.th2 { border-left: 2pt solid #ffffff; border-right: 2pt solid #ffffff; }
+table.unidad th.th3 { border-left: 2pt solid #ffffff; }
 table.unidad td {
     border: 0.8pt solid #000000; font-family: opensans; font-weight: bold; color: #000000;
     text-align: center; vertical-align: middle; padding-top: 2.7pt; padding-bottom: 2.7pt;
