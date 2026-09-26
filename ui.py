@@ -711,6 +711,73 @@ class DialogoDatosConsorcio(tk.Toplevel):
 
 
 # ===========================================================================
+# Diálogo: borrar un edificio (se archiva, no se pierde)
+# ===========================================================================
+
+class DialogoBorrarEdificio(tk.Toplevel):
+    """Muestra qué tiene el edificio y pide escribir su nombre para confirmar el borrado."""
+
+    def __init__(self, parent, edificio, on_borrado=None):
+        super().__init__(parent)
+        self.edificio = edificio
+        self.on_borrado = on_borrado
+        self.title("Borrar edificio")
+        self.configure(bg=COLOR_FONDO)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        r = database.resumen_edificio(edificio)
+        cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
+        cont.pack(fill="both", expand=True)
+        tk.Label(cont, text=f"Borrar «{edificio}»", font=FUENTE_BOLD, bg=COLOR_FONDO, fg="#b3261e").pack(anchor="w")
+        tk.Label(
+            cont, bg=COLOR_FONDO, font=FUENTE_NORMAL, justify="left", wraplength=430,
+            text=f"Tiene {r['unidades']} unidad(es), {r['recibos']} recibo(s) en el historial y "
+                 f"{r['pdfs']} PDF.\n\nDeja de aparecer en la app. Sus unidades, historial, numeración, carpeta de "
+                 "recibos y planilla de pagos NO se pierden: se guardan en datos/edificios_borrados/ para "
+                 "poder recuperarlos a mano.\n\nCerrá la planilla de Excel y los PDF de este edificio si están abiertos.",
+        ).pack(anchor="w", pady=(8, 10))
+        tk.Label(cont, text="Para confirmar, escribí el nombre del edificio:", font=FUENTE_NORMAL,
+                 bg=COLOR_FONDO).pack(anchor="w")
+        self.var_nombre = tk.StringVar()
+        entrada = tk.Entry(cont, textvariable=self.var_nombre, width=44, font=FUENTE_NORMAL)
+        entrada.pack(anchor="w", pady=(4, 12))
+        entrada.focus_set()
+
+        botones = tk.Frame(cont, bg=COLOR_FONDO)
+        botones.pack()
+        self.btn_borrar = tk.Button(botones, text="Borrar edificio", command=self._borrar, bg="#b3261e", fg="white",
+                                    font=FUENTE_BOLD, padx=14, pady=4, state="disabled")
+        self.btn_borrar.pack(side="left", padx=6)
+        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+        self.var_nombre.trace_add("write", lambda *_: self.btn_borrar.config(
+            state="normal" if self.var_nombre.get().strip() == self.edificio else "disabled"))
+
+    def _borrar(self):
+        if self.var_nombre.get().strip() != self.edificio:
+            return
+        try:
+            destino = database.delete_edificio(self.edificio)
+        except PermissionError:
+            messagebox.showwarning(
+                "Archivos abiertos",
+                "No se pudo borrar porque hay archivos abiertos de este edificio (la planilla de pagos en "
+                "Excel o algún PDF de sus recibos).\n\nCerralos y probá de nuevo. No se modificó nada.",
+                parent=self)
+            return
+        except ValueError as e:
+            messagebox.showwarning("No se pudo borrar", str(e), parent=self)
+            return
+        except Exception as e:
+            manejar_error("No se pudo borrar el edificio", e)
+            return
+        self.destroy()
+        if self.on_borrado:
+            self.on_borrado(destino)
+
+
+# ===========================================================================
 # Ventana: asignar la celda de la planilla de pagos a cada unidad
 # ===========================================================================
 
@@ -841,6 +908,8 @@ class VentanaAdministracion(tk.Toplevel):
         tk.Button(top, text="Datos del consorcio", command=self._datos_consorcio,
                   bg=COLOR_PRIMARIO, fg="white", font=FUENTE_BOLD).pack(side="left", padx=6)
         tk.Button(top, text="+ Nuevo edificio", command=self._nuevo_edificio).pack(side="left", padx=6)
+        tk.Button(top, text="Borrar edificio", command=self._borrar_edificio, bg="#b3261e",
+                  fg="white").pack(side="left", padx=6)
         tk.Button(top, text="+ Nueva unidad", command=self._nueva_unidad).pack(side="left", padx=6)
         tk.Button(top, text="Asignar celdas", command=self._asignar_celdas).pack(side="left", padx=6)
         tk.Button(top, text="Abrir carpeta del edificio", command=self._abrir_carpeta).pack(side="left", padx=6)
@@ -922,6 +991,22 @@ class VentanaAdministracion(tk.Toplevel):
             self.var_edificio.set(nombre)
             self._recargar()
         DialogoEdificioNuevo(self, on_guardar=al_guardar)
+
+    def _borrar_edificio(self):
+        edificio = self.var_edificio.get()
+        if not edificio:
+            messagebox.showwarning("Atención", "Primero seleccioná un edificio.")
+            return
+
+        def al_borrar(destino):
+            nombres = database.get_nombres_edificios()
+            self.combo_edificio["values"] = nombres
+            self.var_edificio.set(nombres[0] if nombres else "")
+            self._recargar()
+            messagebox.showinfo("Edificio borrado", f"Se borró «{edificio}».\n\nSus datos, recibos PDF y planilla "
+                                f"quedaron guardados en:\n{destino}", parent=self)
+
+        DialogoBorrarEdificio(self, edificio, on_borrado=al_borrar)
 
     def _nueva_unidad(self):
         edificio = self.var_edificio.get()

@@ -14,6 +14,7 @@ de nuevo en medio del archivo lo corrompería).
 
 import csv
 import os
+import shutil
 import uuid
 import zipfile
 from datetime import datetime
@@ -285,6 +286,93 @@ def update_edificio(nombre_actual, **datos):
 
     _sincronizar_pagos_seguro(nuevo)
     return nuevo
+
+
+def resumen_edificio(nombre):
+    """Cuánto tiene un edificio: {"unidades", "recibos" (en el historial), "pdfs" (en su carpeta), "planilla"}."""
+    carpeta = carpeta_edificio(nombre)
+    pdfs = sum(1 for _r, _d, archivos in os.walk(carpeta) for a in archivos if a.lower().endswith(".pdf")) \
+        if os.path.isdir(carpeta) else 0
+    return {
+        "unidades": len(get_unidades_por_edificio(nombre)),
+        "recibos": sum(1 for r in _read_csv(config.HISTORIAL_CSV) if r.get("edificio") == nombre),
+        "pdfs": pdfs,
+        "planilla": os.path.isfile(pagos.ruta_pagos_edificio(nombre)),
+    }
+
+
+def _archivos_planilla(nombre):
+    """Planilla de pagos del edificio y sus copias de respaldo (rutas completas)."""
+    if not os.path.isdir(config.PAGOS_DIR):
+        return []
+    base = f"{sanitize_filename(nombre)}_pagos"
+    return [os.path.join(config.PAGOS_DIR, f) for f in sorted(os.listdir(config.PAGOS_DIR))
+            if f.startswith(base) and f.lower().endswith(".xlsx") and not f.startswith("~$")]
+
+
+def delete_edificio(nombre):
+    """
+    Borra un edificio de la app SIN perder nada: sus unidades, numeración, historial, la
+    carpeta de recibos PDF y la planilla de pagos se guardan en
+    datos/edificios_borrados/<nombre>_<fecha>/ (para recuperarlos a mano).
+    Devuelve la carpeta de archivo. Lanza ValueError si no existe y PermissionError si hay
+    archivos abiertos (planilla en Excel o algún PDF); en cualquier fallo deja todo como estaba.
+    """
+    edificio = get_edificio(nombre)
+    if edificio is None:
+        raise ValueError("No se encontró el edificio indicado.")
+
+    destino = os.path.join(config.EDIFICIOS_BORRADOS_DIR, f"{sanitize_filename(nombre)}_{datetime.now():%Y%m%d_%H%M%S}")
+    base_destino, n = destino, 2
+    while os.path.exists(destino):
+        destino, n = f"{base_destino}_{n}", n + 1
+
+    csvs = (config.EDIFICIOS_CSV, config.UNIDADES_CSV, config.NUMERACION_CSV, config.HISTORIAL_CSV)
+    respaldo = {ruta: open(ruta, "rb").read() for ruta in csvs if os.path.exists(ruta)}
+    movidos = []   # (origen, destino) a deshacer si algo falla
+    try:
+        os.makedirs(destino)
+        _write_csv(os.path.join(destino, "edificio.csv"), EDIFICIOS_CAMPOS, [edificio])
+        _write_csv(os.path.join(destino, "unidades.csv"), UNIDADES_CAMPOS,
+                   [u for u in get_all_unidades() if u["edificio"] == nombre])
+        _write_csv(os.path.join(destino, "historial.csv"), HISTORIAL_CAMPOS,
+                   [r for r in _read_csv(config.HISTORIAL_CSV) if r.get("edificio") == nombre])
+        _write_csv(os.path.join(destino, "numeracion.csv"), NUMERACION_CAMPOS,
+                   [r for r in _read_csv(config.NUMERACION_CSV) if r.get("edificio") == nombre])
+        with open(os.path.join(destino, "LEEME.txt"), "w", encoding="utf-8") as f:
+            f.write(f"Edificio «{nombre}» borrado el {datetime.now():%d/%m/%Y %H:%M}.\n"
+                    "Acá quedaron sus datos: edificio.csv, unidades.csv, historial.csv, numeracion.csv,\n"
+                    "la carpeta «recibos» (PDF) y la carpeta «planilla» (Excel de pagos).\n")
+
+        carpeta = carpeta_edificio(nombre)
+        if os.path.isdir(carpeta):
+            shutil.move(carpeta, os.path.join(destino, "recibos"))
+            movidos.append((carpeta, os.path.join(destino, "recibos")))
+        for ruta in _archivos_planilla(nombre):
+            os.makedirs(os.path.join(destino, "planilla"), exist_ok=True)
+            nuevo = os.path.join(destino, "planilla", os.path.basename(ruta))
+            shutil.move(ruta, nuevo)
+            movidos.append((ruta, nuevo))
+
+        _write_csv(config.EDIFICIOS_CSV, EDIFICIOS_CAMPOS, [e for e in get_edificios() if e["nombre"] != nombre])
+        _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, [u for u in get_all_unidades() if u["edificio"] != nombre])
+        _write_csv(config.NUMERACION_CSV, NUMERACION_CAMPOS,
+                   [r for r in _read_csv(config.NUMERACION_CSV) if r.get("edificio") != nombre])
+        _write_csv(config.HISTORIAL_CSV, HISTORIAL_CAMPOS,
+                   [r for r in _read_csv(config.HISTORIAL_CSV) if r.get("edificio") != nombre])
+    except Exception:
+        for origen, nuevo in reversed(movidos):
+            try:
+                shutil.move(nuevo, origen)
+            except OSError:
+                pass
+        for ruta, contenido in respaldo.items():
+            with open(ruta, "wb") as f:
+                f.write(contenido)
+        if not any(os.path.exists(nuevo) for _origen, nuevo in movidos):   # todo volvió a su lugar: no dejar restos
+            shutil.rmtree(destino, ignore_errors=True)
+        raise
+    return destino
 
 
 def add_edificio(nombre):

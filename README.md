@@ -335,6 +335,20 @@ hacerlo, cerrá la planilla de Excel y los PDF de ese consorcio: si hay algo
 abierto, la app avisa y **no cambia nada**. Los PDF ya generados conservan
 su nombre de archivo original.
 
+### Borrar un edificio
+Si la inmobiliaria deja de administrar un consorcio: en esa misma ventana,
+botón rojo **"Borrar edificio"**. Muestra cuántas unidades, recibos y PDF
+tiene y **pide escribir el nombre exacto** del edificio para confirmar.
+
+No se pierde nada: el edificio deja de aparecer en la app y todo lo suyo se
+mueve a `datos/edificios_borrados/<Edificio>_<fecha>/`:
+`edificio.csv`, `unidades.csv`, `historial.csv`, `numeracion.csv`, la carpeta
+`recibos/` (los PDF) y la carpeta `planilla/` (el Excel de pagos y sus
+respaldos). Para recuperarlo hay que copiar esos datos de vuelta a mano. Si
+hay algo abierto (la planilla en Excel o un PDF), la app avisa y **no
+cambia nada**. Se puede volver a crear un edificio con el mismo nombre, y
+empieza limpio (numeración desde 1).
+
 ### Configuración de la inmobiliaria
 Menú **Administrar → Configuración de la inmobiliaria**: nombre,
 subtítulo (el texto que va debajo del nombre en el recibo), dirección,
