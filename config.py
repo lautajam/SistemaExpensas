@@ -53,10 +53,7 @@ IMAGENES_INMOBILIARIA = {
 }
 
 # Plantilla del recibo (HTML + CSS editables por el usuario)
-RECIBOS_HTML = {
-    tipo: os.path.join(PLANTILLA_DIR, f"recibo_{tipo.lower()}.html")
-    for tipo in ("DEPTO", "LOCAL", "COCHERA", "BAULERA")
-}
+RECIBO_HTML = os.path.join(PLANTILLA_DIR, "recibo.html")
 RECIBO_CSS = os.path.join(PLANTILLA_DIR, "estilo.css")
 
 # Meses en español (índice 0 = enero)

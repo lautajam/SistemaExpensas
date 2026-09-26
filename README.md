@@ -3,7 +3,7 @@
 Aplicación de escritorio para Windows que genera los recibos de expensas de
 consorcios administrados. Funciona sin conexión: los datos se guardan en
 archivos CSV editables con Excel, los pagos se toman de una planilla Excel por
-edificio y los recibos se emiten en PDF a partir de plantillas HTML/CSS
+edificio y los recibos se emiten en PDF a partir de una plantilla HTML/CSS
 editables.
 
 ## Contenido
@@ -19,7 +19,7 @@ editables.
 9. [Unidades](#9-unidades)
 10. [Administración](#10-administración)
 11. [Recibos: numeración y nombres de archivo](#11-recibos-numeración-y-nombres-de-archivo)
-12. [Plantillas del recibo](#12-plantillas-del-recibo)
+12. [Plantilla del recibo](#12-plantilla-del-recibo)
 13. [Modelo de datos](#13-modelo-de-datos)
 14. [Robustez y decisiones de diseño](#14-robustez-y-decisiones-de-diseño)
 15. [Datos de ejemplo](#15-datos-de-ejemplo)
@@ -40,8 +40,8 @@ editables.
   corriente.
 - Generación de recibos en PDF por lote, con numeración correlativa por
   edificio e indicador de recibo emitido en la pantalla principal.
-- Cuatro plantillas de recibo (una por tipo de unidad), editables sin
-  recompilar.
+- Una única plantilla de recibo (HTML/CSS) para todos los tipos de unidad,
+  editable sin recompilar, con el importe también en letras.
 - Datos del consorcio y del administrador (CUIT, RPAC), datos de la
   inmobiliaria, logo y firma digital.
 - Historial de recibos, editor de tablas, copia de seguridad y archivado de
@@ -85,11 +85,10 @@ y copia la carpeta `plantilla/` junto al ejecutable. El resultado queda en
 dist/
 ├── SistemaExpensas.exe
 └── plantilla/
-    ├── recibo_depto.html
-    ├── recibo_local.html
-    ├── recibo_cochera.html
-    ├── recibo_baulera.html
-    └── estilo.css
+    ├── recibo.html
+    ├── estilo.css
+    ├── marco.png
+    └── fonts/
 ```
 
 La carpeta `plantilla/` **no se empaqueta dentro del ejecutable** a propósito:
@@ -116,17 +115,17 @@ SistemaExpensas/
 ├── unidades.py             Tipos de unidad, etiquetas, orden y modos de pago
 ├── pagos.py                Planillas de pagos (Excel por edificio)
 ├── utils.py                Importes, fechas, nombres de archivo, CUIT
+├── recibo.py               Datos del recibo: formatos, importe en letras, ajuste de textos
 ├── pdf_generator.py        Generación del PDF desde la plantilla
 ├── ui.py                   Interfaz gráfica (Tkinter)
 ├── requirements.txt
 ├── construir_exe.bat
 │
 ├── plantilla/              Diseño del recibo (editable)
-│   ├── recibo_depto.html
-│   ├── recibo_local.html
-│   ├── recibo_cochera.html
-│   ├── recibo_baulera.html
-│   └── estilo.css          Compartido por las cuatro plantillas
+│   ├── recibo.html         Plantilla única del recibo
+│   ├── estilo.css          Colores, tipografías y disposición
+│   ├── marco.png           Marco violeta de la hoja (fondo de la página)
+│   └── fonts/              Tipografía Open Sans (licencia OFL)
 │
 ├── datos/                  Se crea al iniciar
 │   ├── edificios.csv
@@ -395,8 +394,9 @@ aparecen en todos los recibos.
 También permite cargar el **logo** y la **firma digital** (PNG o JPG, con vista
 previa) y quitarlos. Se guardan como `configuracion/logo.png` y
 `configuracion/firma.png`, se incluyen en la copia de seguridad y se reducen
-a 1200 px si son muy grandes. **Actualmente no se utilizan en ninguna
-plantilla.**
+a 1200 px si son muy grandes. El **logo** se imprime arriba a la derecha del
+recibo y la **firma** sobre la línea «Firma / Aclaración»; si no hay imagen
+cargada, ese lugar queda en blanco.
 
 ### Editor de datos (CSV)
 
@@ -469,47 +469,85 @@ recibo_expensas_Edificio_Alsina_123_1_A_SEPTIEMBRE.pdf          (existente)
 recibo_expensas_Edificio_Alsina_123_1_A_SEPTIEMBRE_00039.pdf    (nuevo)
 ```
 
-## 12. Plantillas del recibo
+## 12. Plantilla del recibo
 
-El diseño se define en archivos de texto plano, sin tocar código Python. Hay
-una plantilla por tipo de unidad (actualmente idénticas) y un estilo
-compartido:
+Hay **una única plantilla** para todos los tipos de unidad (departamento, local,
+cochera y baulera). El recibo es una hoja A4 con marco violeta, generada a partir
+de archivos de texto plano, sin tocar código Python:
 
-| Archivo | Uso |
+| Archivo | Contenido |
 |---|---|
-| `plantilla/recibo_depto.html` | Recibos de departamentos |
-| `plantilla/recibo_local.html` | Recibos de locales |
-| `plantilla/recibo_cochera.html` | Recibos de cocheras |
-| `plantilla/recibo_baulera.html` | Recibos de bauleras |
+| `plantilla/recibo.html` | Estructura y textos fijos del recibo |
 | `plantilla/estilo.css` | Colores, tipografías, tamaños y disposición |
+| `plantilla/marco.png` | Marco de la hoja (imagen de fondo de la página, A4) |
+| `plantilla/fonts/` | Tipografía Open Sans (regular y negrita) |
+| `plantilla/EXPENSA_PLANTILLA.png` | Imagen de referencia del diseño (no se usa al generar) |
 
-Las plantillas contienen marcadores `{{CLAVE}}` que se reemplazan por los datos
-de cada recibo:
+### Qué va en cada lugar
+
+Todo el texto del recibo es negro. Lo que cambia en cada recibo sale de los datos del
+sistema; el resto es texto fijo.
+
+| Lugar del recibo | Contenido |
+|---|---|
+| Encabezado izquierdo | «Consorcio de Propietarios sitio en la calle» + **dirección y localidad** del consorcio; «C.U.I.T.:» + **CUIT del consorcio**. Si el edificio **no tiene CUIT**, esa línea se quita y el texto del consorcio se agranda y queda centrado verticalmente |
+| Encabezado derecho | **Logo** de la inmobiliaria, su **nombre** y su **subtítulo**, centrados verticalmente |
+| EXPENSAS / GASTO DE | Mes de las expensas y mes de los gastos, abreviados (`SEPT. 26`, `AGO. 26`); «Gasto de» muestra `PARCIAL`, `DEUDA` o `NO PAGADO` según el estado de pago |
+| RECIBO DE EXPENSAS N° / FECHA | **Número** de recibo (mínimo 3 dígitos, `001`) y **fecha de emisión** (`24/09/26`) |
+| Tabla «Depto-Coch-Local» | La unidad y, si van en el mismo recibo, sus cocheras y bauleras separadas por `\|`: `1ero A`, `1ero A \| Coch. 67`, `1ero A \| Baul 12`, `1ero A \| Coch. 67 \| Baul 12`, `Coch. 67`, `Baul 12`… Solo aparecen las que existen |
+| Tabla «Unidad Funcional» | La **UF** de la unidad (la del departamento; las cocheras y bauleras que van con él no se muestran) |
+| Tabla «Propietario» | El **dueño** de la unidad |
+| Recibí de | El **inquilino**; si la unidad no tiene inquilino cargado, el propietario |
+| Frase sobre el importe | Depende del estado de pago (ver abajo) |
+| Importe abonado | **Importe** sin decimales si es entero (`$67.000.-`) o con coma (`$67.000,50.-`); en un grupo que paga junto, el total sumado |
+| (Pesos …) | El **importe en letras** (`SESENTA Y SIETE MIL`, con centavos `… CON 50/100`) |
+| Firma / Aclaración | La **firma digital** de la inmobiliaria sobre la línea |
+| Pie | **Administrador** del consorcio (nombre, CUIT, RPAC) y **teléfono** y **correo** de la inmobiliaria |
+
+Los textos largos (nombres, direcciones, unidades) reducen automáticamente su
+tamaño de letra para entrar en su lugar. Los datos se insertan como texto: los
+caracteres como `&` o `<` no rompen el PDF.
+
+**Frase sobre el importe** (`FRASE_PAGO_POR_ESTADO` en `recibo.py`):
+
+| Estado de pago | Frase |
+|---|---|
+| Total (o sin estado) | El pago total de las expensas indicadas para el mes correspondiente: |
+| Parcial | El pago parcial de las expensas indicadas para el mes correspondiente: |
+| Deuda | El pago de la deuda de expensas de meses anteriores: |
+| No pagado | Expensas indicadas para el mes correspondiente, pendientes de pago: |
+
+### Marcadores
+
+`recibo.html` contiene marcadores entre llaves dobles que se reemplazan por los
+datos de cada recibo (los arma `recibo.py`):
 
 | Marcador | Contenido |
 |---|---|
-| `{{NUMERO_RECIBO}}`, `{{FECHA_EMISION}}` | Número (5 dígitos) y fecha de emisión |
-| `{{EXPENSAS_DE}}`, `{{GASTOS_DE}}` | Períodos del recibo |
+| `{{NUMERO_RECIBO}}`, `{{FECHA_EMISION}}` | Número y fecha de emisión |
+| `{{EXPENSAS_DE}}`, `{{GASTOS_DE}}` | Períodos, abreviados |
+| `{{EDIFICIO_UBICACION}}` | Dirección y localidad del consorcio |
+| `{{BLOQUE_CUIT}}` | Línea completa «C.U.I.T.: …» del consorcio; vacía si el edificio no tiene CUIT |
 | `{{EDIFICIO_NOMBRE}}`, `{{EDIFICIO_DIRECCION}}`, `{{EDIFICIO_LOCALIDAD}}`, `{{EDIFICIO_CUIT}}` | Datos del consorcio |
 | `{{ADMIN_NOMBRE}}`, `{{ADMIN_CUIT}}`, `{{ADMIN_RPAC}}` | Datos del administrador |
 | `{{INMOBILIARIA_NOMBRE}}`, `{{INMOBILIARIA_SUBTITULO}}`, `{{INMOBILIARIA_DIRECCION}}`, `{{INMOBILIARIA_TELEFONO}}`, `{{INMOBILIARIA_EMAIL}}` | Datos de la inmobiliaria |
-| `{{TIPO}}` | `DEPTO`, `LOCAL`, `COCHERA` o `BAULERA` |
-| `{{PISO}}`, `{{UNIDAD}}`, `{{UF}}` | Identificación de la unidad |
-| `{{DEPTO}}` | Departamento al que pertenece una cochera o baulera (ej. `1° A`); vacío si no tiene |
-| `{{DUENO}}`, `{{INQUILINO}}` | Dueño e inquilino |
-| `{{IMPORTE}}` | Importe del recibo (en un grupo que paga junto, el total sumado) |
-| `{{IMPORTE_DEPTO}}` | Importe solo del departamento (igual a `{{IMPORTE}}` si no hay grupo) |
-| `{{ASOCIADAS}}`, `{{COCHERAS}}`, `{{BAULERAS}}` | Unidades incluidas en el recibo del departamento (ej. `Cochera 6 y Baulera 2`); vacíos si no hay |
+| `{{LOGO}}`, `{{FIRMA}}` | Imágenes de la inmobiliaria (vacías si no están cargadas) |
+| `{{UNIDADES}}`, `{{UF}}`, `{{PROPIETARIO}}` | Contenido de la tabla de la unidad |
+| `{{RECIBI_DE}}` | Inquilino (o propietario si no hay inquilino) |
+| `{{FRASE_PAGO}}` | Frase según el estado de pago |
+| `{{IMPORTE}}`, `{{IMPORTE_LETRAS}}` | Importe (sin el signo `$`) y su texto en letras |
+| `{{TAM_CONSORCIO}}`, `{{INTERLINEADO_CONSORCIO}}`, `{{TAM_INMOBILIARIA}}`, `{{TAM_SUBTITULO}}`, `{{TAM_UNIDADES}}`, `{{TAM_UF}}`, `{{TAM_PROPIETARIO}}`, `{{TAM_RECIBI_DE}}`, `{{TAM_IMPORTE}}`, `{{TAM_IMPORTE_LETRAS}}` | Tamaño de letra (pt) ajustado al espacio disponible |
+| `{{TIPO}}`, `{{PISO}}`, `{{UNIDAD}}`, `{{INQUILINO}}`, `{{DUENO}}` | Datos sueltos de la unidad, disponibles si una plantilla nueva los necesita |
 
-Pueden modificarse los textos fijos, el orden de las secciones, los colores, las
-fuentes y los espaciados (y agregarse un logo con `<img src="logo.png">`,
-guardando el archivo dentro de `plantilla/`). No hace falta recompilar: basta
-con generar un recibo de prueba.
+Pueden modificarse los textos fijos, los colores, las tipografías y los
+espaciados. No hace falta recompilar: basta con generar un recibo de prueba.
 
-> **Limitación:** el motor de PDF (`xhtml2pdf`) admite un subconjunto de CSS
-> 2.1. Funciona con `float`, `table`, bordes, colores y tipografías, pero **no
-> con `flexbox` ni `grid`**. Los rediseños deben basarse en `float` o `table`,
-> como la plantilla incluida.
+> **Limitaciones:** el motor de PDF (`xhtml2pdf`) admite un subconjunto de CSS
+> 2.1. Funciona con `table`, bordes, colores y tipografías, pero **no con
+> `flexbox` ni `grid`**; los rediseños deben basarse en tablas. Además, no
+> conviene fijar alturas grandes en celdas de tabla: `xhtml2pdf` achica todo el
+> contenido si no entra. El marco violeta es la imagen `marco.png`; para
+> cambiar su color o grosor hay que reemplazarla por otra imagen A4.
 
 ## 13. Modelo de datos
 

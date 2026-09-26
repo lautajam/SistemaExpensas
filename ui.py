@@ -19,6 +19,7 @@ comprensible (messagebox), nunca como un traceback crudo de Python.
 import os
 import traceback
 import tkinter as tk
+from datetime import date
 from tkinter import ttk, messagebox, filedialog
 
 import config
@@ -35,6 +36,7 @@ from utils import (
     revelar_en_explorador,
 )
 from pdf_generator import generar_pdf_recibo
+from recibo import armar_datos as armar_datos_recibo
 import pagos
 from unidades import (
     BAULERA, COCHERA, DEPTO, LOCAL, TIPOS, TIPOS_ASOCIABLES,
@@ -1978,8 +1980,7 @@ class App(tk.Tk):
             else:
                 texto, estado = pagos.gastos_de_unidad(estados_pagos, u, mes_anterior)
             importe = sum(parse_importe(m["importe"]) for m in miembros if not incluida_en_total(m))
-            plan.append({"u": u, "agrupadas": agrupadas, "gastos_de": texto, "importe": importe,
-                         "importe_depto": parse_importe(u["importe"])})
+            plan.append({"u": u, "agrupadas": agrupadas, "gastos_de": texto, "importe": importe, "estado": estado})
 
             etiqueta = etiqueta_unidad(u, por_id) + (
                 f" (con {descripcion_asociadas(agrupadas)})" if agrupadas else "")
@@ -2035,50 +2036,23 @@ class App(tk.Tk):
                 tipo = normalizar_tipo(u["tipo"])
                 depto = depto_de(u, por_id)
                 depto_etiqueta = etiqueta_unidad(depto) if depto else ""
-                cocheras = [h for h in agrupadas if normalizar_tipo(h["tipo"]) == COCHERA]
-                bauleras = [h for h in agrupadas if normalizar_tipo(h["tipo"]) == BAULERA]
                 sufijo = "".join(f" + {etiqueta_unidad(h)}" for h in agrupadas)
                 try:
                     numero = database.get_next_numero(edificio)
-                    numero_fmt = f"{numero:05d}"
+                    numero_fmt = f"{numero:03d}"
 
                     ruta_pdf, _nombre = nombre_archivo_recibo(
                         edificio, u["piso"], u["unidad"], expensas_de, numero, carpeta_destino,
                         tipo=tipo, depto=depto_etiqueta,
                     )
 
-                    datos_pdf = {
-                        "NUMERO_RECIBO": numero_fmt,
-                        "FECHA_EMISION": fecha_hoy_es(),
-                        "EDIFICIO_NOMBRE": edificio,
-                        "EDIFICIO_DIRECCION": datos_edificio.get("direccion", ""),
-                        "EDIFICIO_LOCALIDAD": datos_edificio.get("localidad", ""),
-                        "EDIFICIO_CUIT": datos_edificio.get("cuit", ""),
-                        "ADMIN_NOMBRE": datos_edificio.get("admin_nombre", ""),
-                        "ADMIN_CUIT": datos_edificio.get("admin_cuit", ""),
-                        "ADMIN_RPAC": datos_edificio.get("admin_rpac", ""),
-                        "EXPENSAS_DE": expensas_de,
-                        "GASTOS_DE": gastos_de,
-                        "PISO": u["piso"],
-                        "UNIDAD": u["unidad"],
-                        "TIPO": tipo,
-                        "DEPTO": depto_etiqueta,
-                        "UF": u["uf"],
-                        "DUENO": u["dueno"],
-                        "INQUILINO": u["inquilino"],
-                        "IMPORTE": format_currency_ar(importe_valor),
-                        "IMPORTE_DEPTO": format_currency_ar(item["importe_depto"]),
-                        "ASOCIADAS": descripcion_asociadas(agrupadas),
-                        "COCHERAS": ", ".join(etiqueta_unidad(h) for h in cocheras),
-                        "BAULERAS": ", ".join(etiqueta_unidad(h) for h in bauleras),
-                        "INMOBILIARIA_NOMBRE": inmobiliaria.get("nombre", ""),
-                        "INMOBILIARIA_SUBTITULO": inmobiliaria.get("subtitulo", ""),
-                        "INMOBILIARIA_DIRECCION": inmobiliaria.get("direccion", ""),
-                        "INMOBILIARIA_TELEFONO": inmobiliaria.get("telefono", ""),
-                        "INMOBILIARIA_EMAIL": inmobiliaria.get("email", ""),
-                    }
+                    datos_pdf = armar_datos_recibo(
+                        numero=numero, fecha=date.today(), edificio=edificio, datos_edificio=datos_edificio,
+                        unidad=u, agrupadas=agrupadas, expensas_de=expensas_de, gastos_de=gastos_de,
+                        estado=item["estado"], importe=importe_valor, inmobiliaria=inmobiliaria,
+                    )
 
-                    generar_pdf_recibo(datos_pdf, ruta_pdf, tipo)
+                    generar_pdf_recibo(datos_pdf, ruta_pdf)
 
                     registro = {
                         "numero_recibo": numero_fmt,

@@ -1,195 +1,100 @@
 /*
     estilo.css
     ----------
-    Estilos del recibo de expensas.
+    Estilos del recibo de expensas (plantilla/recibo.html).
 
-    IMPORTANTE: el PDF se genera con la librería "xhtml2pdf", que soporta
-    un subconjunto de CSS 2.1 (NO soporta flexbox ni grid). Por eso el
-    layout de dos columnas se resuelve con "float", y las tablas se usan
-    para alinear filas de datos. Podés cambiar colores, tipografías y
-    textos sin problema; si agregás layouts nuevos, usá float/table en
-    vez de flex/grid.
+    IMPORTANTE: el PDF se genera con la libreria "xhtml2pdf", que soporta un
+    subconjunto de CSS 2.1 (NO soporta flexbox ni grid). Por eso el diseño se
+    resuelve con tablas y bloques. El marco violeta de la hoja es la imagen
+    marco.png (fondo de la pagina). Colores del diseño:
+        negro (todo el texto)   #000000
+        azul (encabezado tabla) #1800ad
+        violeta (marco)         #482c97
+    Tipografia: Open Sans (plantilla/fonts, licencia OFL). pdf_generator.py la
+    registra con los nombres opensans (normal) y opensansbold (negrita): en el
+    CSS se usa font-family: opensans con font-weight: bold.
+    No usar altos fijos grandes en tablas: xhtml2pdf achica todo el contenido
+    de una celda si no entra.
 */
 
 @page {
-    size: A4;
-    margin: 2cm 1.8cm;
+    size: A4 portrait;
+    margin: 29.5pt 30pt 20pt 31pt;
+    background-image: url("marco.png");
 }
 
 body {
-    font-family: Helvetica, Arial, sans-serif;
-    font-size: 11pt;
-    color: #222222;
+    font-family: opensans;
+    font-size: 12pt;
+    color: #000000;
+    margin: 0;
+    padding: 0;
 }
 
-.hoja {
-    width: 100%;
-}
+p { margin: 0; padding: 0; }
+
+.dato { color: #000000; line-height: 1pt; }
 
 /* ---------- Encabezado ---------- */
 
-.encabezado {
-    width: 100%;
-}
+table.cab { width: 100%; }
+td.cab-izq { width: 46%; height: 96pt; vertical-align: middle; text-align: center; }
+td.cab-med { width: 12%; }
+td.cab-der { width: 42%; height: 96pt; vertical-align: middle; text-align: center; }
 
-.encabezado-izq {
-    float: left;
-    width: 60%;
-}
+p.consorcio { font-family: opensans; font-weight: bold; font-size: 12.5pt; line-height: 17pt; text-align: center; margin-left: 6pt; margin-right: 6pt; }
+p.cuit      { font-family: opensans; font-weight: bold; font-size: 18pt; line-height: 22pt; text-align: center; margin-top: 8pt; }
+p.logo      { text-align: center; font-size: 1pt; line-height: 1pt; }
+p.inmo      { font-size: 12.5pt; line-height: 17pt; text-align: center; margin-top: 3pt; }
+p.subinmo   { font-size: 11.5pt; line-height: 16pt; text-align: center; margin-top: 1pt; }
 
-.encabezado-der {
-    float: right;
-    width: 38%;
-    text-align: right;
-}
+table.linea1 { width: 100%; margin-top: 9pt; }
+table.linea1 td { border-top: 3.4pt solid #000000; font-size: 1pt; line-height: 1pt; height: 1pt; }
+table.linea2 { width: 100%; margin-top: 2pt; }
+table.linea2 td { border-top: 1.4pt solid #000000; font-size: 1pt; line-height: 1pt; height: 1pt; }
 
-.nombre-inmobiliaria {
-    font-size: 16pt;
-    font-weight: bold;
-    color: #1a3d5c;
-}
+/* ---------- Titulos ---------- */
 
-.subtitulo {
-    font-size: 9pt;
-    letter-spacing: 1px;
-    color: #555555;
-    margin-top: 2px;
-}
-
-.numero-recibo {
-    font-size: 13pt;
-    font-weight: bold;
-    color: #1a3d5c;
-}
-
-.fecha-emision {
-    font-size: 9pt;
-    color: #555555;
-    margin-top: 2px;
-}
-
-.linea-separadora {
-    clear: both;
-    border-top: 1.5pt solid #1a3d5c;
-    margin-top: 14px;
-    margin-bottom: 14px;
-}
-
-/* ---------- Datos del edificio y período ---------- */
-
-.datos-edificio {
-    margin-bottom: 10px;
-    font-size: 12pt;
-}
-
-.etiqueta {
-    color: #555555;
-    font-size: 9pt;
-    font-weight: bold;
-}
-
-.valor {
-    font-size: 12pt;
-    margin-left: 6px;
-}
-
-.valor.destacado {
-    font-weight: bold;
-    color: #1a3d5c;
-}
-
-.bloque-periodo {
-    width: 100%;
-    margin-bottom: 16px;
-}
-
-.periodo-item {
-    margin-bottom: 4px;
-}
+table.titulos { width: 100%; margin-top: 28pt; }
+td.tit-izq { width: 45%; vertical-align: top; }
+td.tit-der { width: 55%; vertical-align: top; text-align: right; }
+p.titulo-izq { font-family: opensans; font-weight: bold; font-size: 22.3pt; line-height: 31pt; }
+p.titulo-der { font-family: opensans; font-weight: bold; font-size: 20.4pt; line-height: 31pt; }
 
 /* ---------- Tabla de la unidad ---------- */
 
-.tabla-unidad {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 18px;
+table.unidad { width: 99.4%; margin-left: 1.6pt; margin-top: 28pt; border-collapse: collapse; }
+table.unidad th {
+    background-color: #1800ad; color: #ffffff; font-family: opensans; font-weight: bold; font-size: 16.7pt;
+    text-align: center; border: 0.8pt solid #1800ad; vertical-align: middle;
+    padding-top: 5.9pt; padding-bottom: 5.9pt;
+}
+table.unidad td {
+    border: 0.8pt solid #000000; font-family: opensans; font-weight: bold; color: #000000;
+    text-align: center; vertical-align: middle; padding-top: 2.7pt; padding-bottom: 2.7pt;
 }
 
-.tabla-unidad th {
-    background-color: #1a3d5c;
-    color: #ffffff;
-    font-size: 9pt;
-    padding: 6px 8px;
-    text-align: left;
-}
+/* ---------- Recibi de / importe ---------- */
 
-.tabla-unidad td {
-    border: 0.5pt solid #cccccc;
-    padding: 8px;
-    font-size: 11pt;
-}
+p.recibi { font-family: opensans; font-weight: bold; font-size: 29.7pt; line-height: 36pt; margin-top: 20pt; margin-left: 2pt; }
+table.recibi-linea { width: 100%; }
+table.recibi-linea td { font-size: 1pt; line-height: 1pt; height: 1pt; }
+td.rl-a { width: 29%; }
+td.rl-b { width: 64%; border-top: 3.6pt solid #000000; }
+td.rl-c { width: 7%; }
+p.frase   { font-family: opensans; font-weight: bold; font-size: 14.7pt; line-height: 20pt; margin-top: 27.6pt; margin-left: 5pt; }
+p.importe { font-family: opensans; font-weight: bold; font-size: 32.5pt; line-height: 40pt; text-align: right; margin-top: 7.3pt; }
+p.letras  { font-family: opensans; font-weight: bold; text-align: right; line-height: 24pt; margin-top: 3.7pt; }
 
-/* ---------- Destinatario ---------- */
+/* ---------- Firma y pie ---------- */
 
-.bloque-destinatario {
-    margin-bottom: 16px;
-    font-size: 11pt;
-    line-height: 1.5;
-}
+table.firma { width: 100%; margin-top: 10pt; }
+td.firma-vacio { width: 63.5%; }
+td.firma-caja  { width: 34.6%; text-align: center; vertical-align: bottom; height: 163pt; }
+td.firma-fin   { width: 1.9%; }
+table.firma-linea { width: 100%; }
+table.firma-linea td { border-top: 2.4pt solid #000000; font-size: 1pt; line-height: 1pt; height: 1pt; }
+p.firma-texto { font-size: 14.7pt; line-height: 22pt; text-align: center; margin-top: 10pt; }
 
-/* ---------- Importe ---------- */
-
-.bloque-importe {
-    background-color: #f2f6f9;
-    border: 1pt solid #1a3d5c;
-    padding: 14px;
-    text-align: center;
-    margin-bottom: 16px;
-}
-
-.importe-etiqueta {
-    font-size: 10pt;
-    color: #555555;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
-}
-
-.importe-valor {
-    font-size: 20pt;
-    font-weight: bold;
-    color: #1a3d5c;
-}
-
-/* ---------- Datos de la inmobiliaria ---------- */
-
-.datos-inmobiliaria {
-    font-size: 9pt;
-    color: #555555;
-    line-height: 1.5;
-    margin-bottom: 30px;
-}
-
-/* ---------- Pie / firma ---------- */
-
-.pie {
-    margin-top: 40px;
-    text-align: center;
-}
-
-.firma-linea {
-    border-top: 0.5pt solid #888888;
-    width: 60%;
-    margin: 0 auto;
-}
-
-.firma-texto {
-    font-size: 9pt;
-    color: #555555;
-    margin-top: 4px;
-}
-
-.fecha-pie {
-    font-size: 8pt;
-    color: #999999;
-    margin-top: 10px;
-}
+p.pie1 { font-size: 14.4pt; line-height: 9.4pt; text-align: center; margin-top: 19.5pt; }
+p.pie2 { font-size: 18.7pt; line-height: 19pt; text-align: center; }

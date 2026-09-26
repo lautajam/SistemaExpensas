@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<!--
+    Plantilla unica del recibo (todos los tipos de unidad). Los datos que cambian en cada recibo
+    (span class="dato") salen de los marcadores entre llaves dobles; el resto es texto fijo.
+    Ver la lista de marcadores en el README y en recibo.py.
+-->
+
+    <!-- Encabezado: consorcio a la izquierda, inmobiliaria con su logo a la derecha (ambos centrados
+         verticalmente). Sin CUIT del consorcio, el marcador de la linea del CUIT queda vacio. -->
+    <table class="cab" cellpadding="0" cellspacing="0"><tr>
+        <td class="cab-izq">
+            <p class="consorcio" style="font-size: {{TAM_CONSORCIO}}pt; line-height: {{INTERLINEADO_CONSORCIO}}pt">Consorcio de Propietarios sitio<br/>en la calle <span class="dato">{{EDIFICIO_UBICACION}}</span>.</p>
+            {{BLOQUE_CUIT}}
+        </td>
+        <td class="cab-med">&nbsp;</td>
+        <td class="cab-der">
+            <p class="logo">{{LOGO}}</p>
+            <p class="inmo" style="font-size: {{TAM_INMOBILIARIA}}pt">{{INMOBILIARIA_NOMBRE}}</p>
+            <p class="subinmo" style="font-size: {{TAM_SUBTITULO}}pt">{{INMOBILIARIA_SUBTITULO}}</p>
+        </td>
+    </tr></table>
+
+    <table class="linea1" cellpadding="0" cellspacing="0"><tr><td>&nbsp;</td></tr></table>
+    <table class="linea2" cellpadding="0" cellspacing="0"><tr><td>&nbsp;</td></tr></table>
+
+    <!-- Periodo, numero y fecha -->
+    <table class="titulos" cellpadding="0" cellspacing="0"><tr>
+        <td class="tit-izq">
+            <p class="titulo-izq">EXPENSAS: <span class="dato">{{EXPENSAS_DE}}</span></p>
+            <p class="titulo-izq">GASTO DE: <span class="dato">{{GASTOS_DE}}</span></p>
+        </td>
+        <td class="tit-der">
+            <p class="titulo-der">RECIBO DE EXPENSAS N&deg; <span class="dato">{{NUMERO_RECIBO}}</span></p>
+            <p class="titulo-der">FECHA: <span class="dato">{{FECHA_EMISION}}</span></p>
+        </td>
+    </tr></table>
+
+    <!-- Unidad -->
+    <table class="unidad" cellpadding="0" cellspacing="0">
+        <tr>
+            <th width="33%">Depto-Coch-Local</th>
+            <th width="34%">Unidad Funcional</th>
+            <th width="33%">Propietario</th>
+        </tr>
+        <tr>
+            <td style="font-size: {{TAM_UNIDADES}}pt">{{UNIDADES}}</td>
+            <td style="font-size: {{TAM_UF}}pt">{{UF}}</td>
+            <td style="font-size: {{TAM_PROPIETARIO}}pt">{{PROPIETARIO}}</td>
+        </tr>
+    </table>
+
+    <!-- Recibi de / importe -->
+    <p class="recibi">Recib&iacute; de: <span class="dato" style="font-size: {{TAM_RECIBI_DE}}pt">{{RECIBI_DE}}</span>.-</p>
+    <table class="recibi-linea" cellpadding="0" cellspacing="0"><tr><td class="rl-a">&nbsp;</td><td class="rl-b">&nbsp;</td><td class="rl-c">&nbsp;</td></tr></table>
+
+    <p class="frase">{{FRASE_PAGO}}</p>
+    <p class="importe" style="font-size: {{TAM_IMPORTE}}pt">Importe abonado: $<span class="dato">{{IMPORTE}}</span>.-</p>
+    <p class="letras" style="font-size: {{TAM_IMPORTE_LETRAS}}pt">(Pesos <span class="dato">{{IMPORTE_LETRAS}}</span>)</p>
+
+    <!-- Firma: la imagen de la firma digital (si esta cargada) va sobre la linea -->
+    <table class="firma" cellpadding="0" cellspacing="0"><tr>
+        <td class="firma-vacio">&nbsp;</td>
+        <td class="firma-caja">
+            {{FIRMA}}
+            <table class="firma-linea" cellpadding="0" cellspacing="0"><tr><td>&nbsp;</td></tr></table>
+            <p class="firma-texto">Firma / Aclaraci&oacute;n</p>
+        </td>
+        <td class="firma-fin">&nbsp;</td>
+    </tr></table>
+
+    <!-- Pie: administrador e inmobiliaria -->
+    <p class="pie1"><span class="dato">{{ADMIN_NOMBRE}}</span> | C.U.I.T.: <span class="dato">{{ADMIN_CUIT}}</span> | RPAC: <span class="dato">{{ADMIN_RPAC}}</span></p>
+    <p class="pie2">Tel: <span class="dato">{{INMOBILIARIA_TELEFONO}}</span> | Email: <span class="dato">{{INMOBILIARIA_EMAIL}}</span></p>
+
+</body>
+</html>
