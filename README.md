@@ -254,6 +254,20 @@ Menú **Administrar → Administrar edificios/unidades**: permite crear
 edificios nuevos, agregar unidades, editar piso/tipo/unidad/inquilino/
 importe, y abrir la carpeta de recibos del edificio.
 
+### Datos del consorcio
+En esa misma ventana, el botón **"Datos del consorcio"** guarda los datos
+del edificio seleccionado: nombre, dirección, localidad y CUIT del
+consorcio, y los del administrador (nombre, CUIT y RPAC). Cada edificio
+tiene los suyos, así que el administrador puede ser distinto en cada uno.
+Los CUIT se ordenan solos como `30-12345678-9` (11 dígitos).
+
+**Cambiar el nombre** actualiza todo lo que depende de él: las unidades, el
+historial de recibos, la numeración, la carpeta de recibos (`edificios/`)
+y la planilla de pagos (que se renombra conservando los montos). Antes de
+hacerlo, cerrá la planilla de Excel y los PDF de ese consorcio: si hay algo
+abierto, la app avisa y **no cambia nada**. Los PDF ya generados conservan
+su nombre de archivo original.
+
 ### Configuración de la inmobiliaria
 Menú **Administrar → Configuración de la inmobiliaria**: nombre,
 subtítulo (el texto que va debajo del nombre en el recibo), dirección,
@@ -368,7 +382,9 @@ Dentro de cada `recibo_*.html` vas a ver marcadores como `{{IMPORTE}}` o
 real de cada recibo al generarlo. Además de los datos de siempre, están
 disponibles `{{TIPO}}` (DEPTO, LOCAL, COCHERA o BAULERA), `{{DEPTO}}` (el
 depto al que pertenece una cochera/baulera, ej. `1° A`; vacío si no
-tiene), `{{UF}}` (unidad funcional) y `{{DUENO}}`. Podés:
+tiene), `{{UF}}` (unidad funcional), `{{DUENO}}` y los datos del consorcio:
+`{{EDIFICIO_DIRECCION}}`, `{{EDIFICIO_LOCALIDAD}}`, `{{EDIFICIO_CUIT}}`,
+`{{ADMIN_NOMBRE}}`, `{{ADMIN_CUIT}}` y `{{ADMIN_RPAC}}`. Podés:
 
 - Cambiar textos fijos (por ejemplo el título "RECIBO N°").
 - Reordenar secciones, agregar un logo (`<img src="logo.png">`,

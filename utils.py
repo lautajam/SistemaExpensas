@@ -35,6 +35,19 @@ def sanitize_filename(nombre):
     return nombre or "SIN_NOMBRE"
 
 
+def normalizar_cuit(texto):
+    """
+    '30123456789' o '30-12345678-9' -> '30-12345678-9'. Vacío -> ''.
+    Lanza ValueError si no tiene 11 dígitos.
+    """
+    digitos = re.sub(r"\D", "", str(texto or ""))
+    if not digitos:
+        return ""
+    if len(digitos) != 11:
+        raise ValueError("El CUIT debe tener 11 dígitos (ej: 30-12345678-9).")
+    return f"{digitos[:2]}-{digitos[2:10]}-{digitos[10]}"
+
+
 def parse_importe(valor):
     """
     Convierte un importe expresado en distintos formatos comunes en Argentina

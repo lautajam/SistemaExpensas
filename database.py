@@ -96,7 +96,8 @@ def _append_csv(path, fieldnames, row):
 # ---------------------------------------------------------------------------
 
 UNIDADES_CAMPOS = ["id", "edificio", "piso", "tipo", "unidad", "uf", "inquilino", "dueno", "importe", "depto_id"]
-EDIFICIOS_CAMPOS = ["id", "nombre"]
+EDIFICIOS_CAMPOS = ["id", "nombre", "direccion", "localidad", "cuit",
+                    "admin_nombre", "admin_cuit", "admin_rpac"]
 NUMERACION_CAMPOS = ["edificio", "ultimo_recibo"]
 HISTORIAL_CAMPOS = [
     "numero_recibo", "edificio", "fecha", "expensas_de", "gastos_de",
@@ -171,11 +172,109 @@ def ensure_data_files():
 # ---------------------------------------------------------------------------
 
 def get_edificios():
-    return _read_csv(config.EDIFICIOS_CSV)
+    filas = _read_csv(config.EDIFICIOS_CSV)
+    for e in filas:
+        for campo in EDIFICIOS_CAMPOS:
+            if e.get(campo) is None:
+                e[campo] = ""
+    return filas
+
+
+def get_edificio(nombre):
+    """Devuelve el dict del edificio con ese nombre, o None."""
+    return next((e for e in get_edificios() if e["nombre"] == nombre), None)
 
 
 def get_nombres_edificios():
     return [e["nombre"] for e in get_edificios()]
+
+
+def _reemplazar_prefijo_archivo(archivo, carpeta_vieja, carpeta_nueva):
+    """Reubica la ruta relativa de un PDF del historial si estaba dentro de la carpeta renombrada."""
+    prefijo = os.path.relpath(carpeta_vieja, config.BASE_DIR) + os.sep
+    if archivo.startswith(prefijo):
+        return os.path.relpath(carpeta_nueva, config.BASE_DIR) + os.sep + archivo[len(prefijo):]
+    return archivo
+
+
+def update_edificio(nombre_actual, **datos):
+    """
+    Guarda los datos del consorcio (nombre, dirección, localidad, cuit y datos del
+    administrador). Si cambia el nombre, actualiza en cascada las unidades, la
+    numeración y el historial de recibos, y renombra la carpeta de recibos y la
+    planilla de pagos. Si algo falla, deja todo como estaba.
+    Devuelve el nombre resultante. Lanza ValueError (datos inválidos) o
+    PermissionError (hay archivos abiertos que impiden el cambio de nombre).
+    """
+    edificios = get_edificios()
+    edificio = next((e for e in edificios if e["nombre"] == nombre_actual), None)
+    if edificio is None:
+        raise ValueError("No se encontró el consorcio indicado.")
+
+    nuevo = str(datos.get("nombre", nombre_actual)).strip()
+    if not nuevo:
+        raise ValueError("El nombre del consorcio no puede estar vacío.")
+    if any(o is not edificio and o["nombre"].strip().lower() == nuevo.lower() for o in edificios):
+        raise ValueError(f"Ya existe un consorcio llamado «{nuevo}».")
+
+    for campo in EDIFICIOS_CAMPOS:
+        if campo not in ("id", "nombre") and campo in datos:
+            edificio[campo] = str(datos[campo]).strip()
+
+    if nuevo == nombre_actual:
+        _write_csv(config.EDIFICIOS_CSV, EDIFICIOS_CAMPOS, edificios)
+        return nombre_actual
+
+    carpeta_vieja, carpeta_nueva = carpeta_edificio(nombre_actual), carpeta_edificio(nuevo)
+    if carpeta_vieja != carpeta_nueva and os.path.exists(carpeta_nueva) \
+            and os.path.normcase(carpeta_nueva) != os.path.normcase(carpeta_vieja):
+        raise ValueError("Ya existe una carpeta de recibos con ese nombre. Elegí otro nombre.")
+
+    csvs = (config.EDIFICIOS_CSV, config.UNIDADES_CSV, config.NUMERACION_CSV, config.HISTORIAL_CSV)
+    respaldo = {ruta: open(ruta, "rb").read() for ruta in csvs if os.path.exists(ruta)}
+    renombrados = []   # (origen, destino) a deshacer si algo falla
+    try:
+        if carpeta_vieja != carpeta_nueva and os.path.isdir(carpeta_vieja):
+            os.rename(carpeta_vieja, carpeta_nueva)
+            renombrados.append((carpeta_vieja, carpeta_nueva))
+        cambio = pagos.renombrar_planilla(nombre_actual, nuevo)
+        if cambio:
+            renombrados.append(cambio)
+
+        unidades = get_all_unidades()
+        for u in unidades:
+            if u["edificio"] == nombre_actual:
+                u["edificio"] = nuevo
+        _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, unidades)
+
+        numeracion = _read_csv(config.NUMERACION_CSV)
+        for f in numeracion:
+            if f["edificio"] == nombre_actual:
+                f["edificio"] = nuevo
+        _write_csv(config.NUMERACION_CSV, NUMERACION_CAMPOS, numeracion)
+
+        historial = _read_csv(config.HISTORIAL_CSV)
+        for r in historial:
+            if r["edificio"] == nombre_actual:
+                r["edificio"] = nuevo
+                r["archivo"] = _reemplazar_prefijo_archivo(r.get("archivo") or "", carpeta_vieja, carpeta_nueva)
+        _write_csv(config.HISTORIAL_CSV, HISTORIAL_CAMPOS, historial)
+
+        edificio["nombre"] = nuevo
+        _write_csv(config.EDIFICIOS_CSV, EDIFICIOS_CAMPOS, edificios)
+    except Exception:
+        for origen, destino in reversed(renombrados):
+            try:
+                os.replace(destino, origen)
+            except OSError:
+                pass
+        for ruta, contenido in respaldo.items():
+            with open(ruta, "wb") as f:
+                f.write(contenido)
+        raise
+
+    _sincronizar_pagos_seguro(nuevo)
+    return nuevo
 
 
 def add_edificio(nombre):

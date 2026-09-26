@@ -56,6 +56,31 @@ def ruta_pagos_edificio(nombre_edificio):
 # Escritura de la planilla
 # ---------------------------------------------------------------------------
 
+def renombrar_planilla(nombre_viejo, nombre_nuevo):
+    """
+    Renombra el archivo de la planilla de un edificio y actualiza el título (B2).
+    Devuelve (ruta_vieja, ruta_nueva), o None si no había planilla. Lanza
+    PermissionError si el archivo está abierto en Excel.
+    """
+    origen, destino = ruta_pagos_edificio(nombre_viejo), ruta_pagos_edificio(nombre_nuevo)
+    if not os.path.isfile(origen):
+        return None
+    if os.path.exists(destino) and os.path.normcase(destino) != os.path.normcase(origen):
+        raise ValueError("Ya existe una planilla de pagos con ese nombre.")
+    os.replace(origen, destino)
+    try:
+        wb = load_workbook(destino)
+        try:
+            wb.worksheets[0].cell(FILA_TITULO, 2).value = nombre_nuevo
+            wb.save(destino)
+        finally:
+            wb.close()
+    except Exception:
+        os.replace(destino, origen)
+        raise
+    return origen, destino
+
+
 def _borde(izq="thin", der="thin", arr="thin", aba="thin"):
     return Border(left=Side(style=izq), right=Side(style=der), top=Side(style=arr), bottom=Side(style=aba))
 

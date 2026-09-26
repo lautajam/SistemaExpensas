@@ -71,7 +71,8 @@ def generar_pdf_recibo(datos, ruta_salida, tipo="DEPTO"):
         INMOBILIARIA_NOMBRE, INMOBILIARIA_SUBTITULO, INMOBILIARIA_DIRECCION,
         INMOBILIARIA_TELEFONO, INMOBILIARIA_EMAIL
     Opcionales: DEPTO (etiqueta del depto al que pertenece una cochera/baulera),
-    UF (unidad funcional) y DUENO.
+    UF (unidad funcional), DUENO y los datos del consorcio: EDIFICIO_DIRECCION,
+    EDIFICIO_LOCALIDAD, EDIFICIO_CUIT, ADMIN_NOMBRE, ADMIN_CUIT y ADMIN_RPAC.
 
     ruta_salida: ruta completa (incluyendo nombre de archivo .pdf) donde
     se va a guardar el PDF generado.

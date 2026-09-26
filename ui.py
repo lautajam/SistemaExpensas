@@ -24,6 +24,7 @@ from tkinter import ttk, messagebox, filedialog
 import config
 import database
 from utils import (
+    normalizar_cuit,
     parse_importe,
     format_currency_ar,
     obtener_periodos,
@@ -404,6 +405,108 @@ class DialogoEdificioNuevo(tk.Toplevel):
 
 
 # ===========================================================================
+# Diálogo: datos del consorcio (nombre, dirección, CUIT y administrador)
+# ===========================================================================
+
+class DialogoDatosConsorcio(tk.Toplevel):
+    def __init__(self, parent, nombre_edificio, on_guardar=None):
+        super().__init__(parent)
+        self.nombre_original = nombre_edificio
+        self.on_guardar = on_guardar
+        datos = database.get_edificio(nombre_edificio) or {}
+
+        self.title("Datos del consorcio")
+        self.configure(bg=COLOR_FONDO)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
+        cont.pack(fill="both", expand=True)
+
+        grupos = [
+            ("Consorcio", [
+                ("nombre", "Nombre:"), ("direccion", "Dirección:"),
+                ("localidad", "Localidad:"), ("cuit", "CUIT del consorcio:"),
+            ]),
+            ("Administrador", [
+                ("admin_nombre", "Nombre del administrador:"),
+                ("admin_cuit", "CUIT del administrador:"), ("admin_rpac", "RPAC:"),
+            ]),
+        ]
+        self.vars = {}
+        fila = 0
+        for titulo, campos in grupos:
+            tk.Label(cont, text=titulo, font=FUENTE_BOLD, bg=COLOR_FONDO, fg=COLOR_PRIMARIO).grid(
+                row=fila, column=0, columnspan=2, sticky="w", pady=(12 if fila else 0, 2))
+            fila += 1
+            for clave, etiqueta in campos:
+                tk.Label(cont, text=etiqueta, font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(
+                    row=fila, column=0, sticky="w", pady=4)
+                var = tk.StringVar(value=datos.get(clave, ""))
+                tk.Entry(cont, textvariable=var, width=38, font=FUENTE_NORMAL).grid(
+                    row=fila, column=1, pady=4, padx=(10, 0))
+                self.vars[clave] = var
+                fila += 1
+
+        tk.Label(cont, text="Si cambiás el nombre, se actualiza en las unidades, el historial, la numeración,\n"
+                            "la carpeta de recibos y la planilla de pagos.",
+                 font=("Segoe UI", 8), fg="#666666", bg=COLOR_FONDO, justify="left").grid(
+            row=fila, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        botones = tk.Frame(cont, bg=COLOR_FONDO)
+        botones.grid(row=fila + 1, column=0, columnspan=2, pady=(14, 0))
+        tk.Button(botones, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
+                  fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
+        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+
+    def _guardar(self):
+        datos = {clave: var.get().strip() for clave, var in self.vars.items()}
+        if not datos["nombre"]:
+            messagebox.showwarning("Datos incompletos", "El nombre del consorcio no puede quedar vacío.", parent=self)
+            return
+        try:
+            datos["cuit"] = normalizar_cuit(datos["cuit"])
+            datos["admin_cuit"] = normalizar_cuit(datos["admin_cuit"])
+        except ValueError as e:
+            messagebox.showwarning("CUIT inválido", str(e), parent=self)
+            return
+
+        if datos["nombre"] != self.nombre_original and not messagebox.askyesno(
+            "Cambiar el nombre del consorcio",
+            f"Vas a cambiar el nombre de «{self.nombre_original}» a «{datos['nombre']}».\n\n"
+            "Se actualiza en las unidades, el historial, la numeración de recibos, la carpeta de "
+            "recibos y la planilla de pagos.\nCerrá la planilla de Excel y los PDF de este consorcio "
+            "si están abiertos.\n\n¿Continuar?",
+            parent=self,
+        ):
+            return
+
+        try:
+            nombre_final = database.update_edificio(self.nombre_original, **datos)
+        except PermissionError:
+            messagebox.showwarning(
+                "Archivos abiertos",
+                "No se pudo cambiar el nombre porque hay archivos abiertos de este consorcio "
+                "(la planilla de pagos en Excel o algún PDF de sus recibos).\n\n"
+                "Cerralos y probá de nuevo. No se modificó nada.",
+                parent=self,
+            )
+            return
+        except ValueError as e:
+            messagebox.showwarning("No se pudo guardar", str(e), parent=self)
+            return
+        except Exception as e:
+            manejar_error("No se pudieron guardar los datos del consorcio", e)
+            return
+
+        mostrar_avisos()
+        if self.on_guardar:
+            self.on_guardar(nombre_final)
+        self.destroy()
+
+
+# ===========================================================================
 # Ventana: administración de edificios / unidades
 # ===========================================================================
 
@@ -413,7 +516,7 @@ class VentanaAdministracion(tk.Toplevel):
         self.on_cambios = on_cambios
         self.title("Administrar edificios y unidades")
         self.configure(bg=COLOR_FONDO)
-        self.geometry("760x480")
+        self.geometry("1000x500")
         self.transient(parent)
 
         top = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=12)
@@ -428,6 +531,8 @@ class VentanaAdministracion(tk.Toplevel):
         self.combo_edificio.pack(side="left", padx=8)
         self.combo_edificio.bind("<<ComboboxSelected>>", lambda e: self._recargar())
 
+        tk.Button(top, text="Datos del consorcio", command=self._datos_consorcio,
+                  bg=COLOR_PRIMARIO, fg="white", font=FUENTE_BOLD).pack(side="left", padx=6)
         tk.Button(top, text="+ Nuevo edificio", command=self._nuevo_edificio).pack(side="left", padx=6)
         tk.Button(top, text="+ Nueva unidad", command=self._nueva_unidad).pack(side="left", padx=6)
         tk.Button(top, text="Abrir carpeta del edificio", command=self._abrir_carpeta).pack(side="left", padx=6)
@@ -472,7 +577,20 @@ class VentanaAdministracion(tk.Toplevel):
             self._unidades_por_iid[iid] = u
 
         if self.on_cambios:
-            self.on_cambios()
+            self.on_cambios(edificio)
+
+    def _datos_consorcio(self):
+        edificio = self.var_edificio.get()
+        if not edificio:
+            messagebox.showwarning("Atención", "Primero seleccioná o creá un edificio.")
+            return
+
+        def al_guardar(nombre_nuevo):
+            self.combo_edificio["values"] = database.get_nombres_edificios()
+            self.var_edificio.set(nombre_nuevo)
+            self._recargar()
+
+        DialogoDatosConsorcio(self, edificio, on_guardar=al_guardar)
 
     def _borrar_seleccionada(self):
         seleccion = self.tree.selection()
@@ -1407,6 +1525,7 @@ class App(tk.Tk):
 
         try:
             inmobiliaria = database.get_inmobiliaria()
+            datos_edificio = database.get_edificio(edificio) or {}
             carpeta_destino = database.crear_carpeta_edificio(edificio)
 
             generados = []   # (registro del historial, etiqueta de la unidad)
@@ -1434,6 +1553,12 @@ class App(tk.Tk):
                         "NUMERO_RECIBO": numero_fmt,
                         "FECHA_EMISION": fecha_hoy_es(),
                         "EDIFICIO_NOMBRE": edificio,
+                        "EDIFICIO_DIRECCION": datos_edificio.get("direccion", ""),
+                        "EDIFICIO_LOCALIDAD": datos_edificio.get("localidad", ""),
+                        "EDIFICIO_CUIT": datos_edificio.get("cuit", ""),
+                        "ADMIN_NOMBRE": datos_edificio.get("admin_nombre", ""),
+                        "ADMIN_CUIT": datos_edificio.get("admin_cuit", ""),
+                        "ADMIN_RPAC": datos_edificio.get("admin_rpac", ""),
                         "EXPENSAS_DE": expensas_de,
                         "GASTOS_DE": gastos_de,
                         "PISO": u["piso"],
@@ -1489,26 +1614,24 @@ class App(tk.Tk):
     # Ventanas auxiliares
     # -----------------------------------------------------------------
 
+    def _refrescar_edificios(self, edificio_preferido=None):
+        """Recarga la lista de edificios; si el actual ya no existe (ej. lo renombraron), pasa al indicado."""
+        nombres = database.get_nombres_edificios()
+        actual = self.var_edificio.get()
+        if actual not in nombres:
+            actual = edificio_preferido if edificio_preferido in nombres else (nombres[0] if nombres else "")
+        self.combo_edificio["values"] = nombres
+        self.var_edificio.set(actual)
+        self._cargar_unidades()
+
     def _abrir_administracion(self):
-        def al_cambiar():
-            edificio_actual = self.var_edificio.get()
-            self.combo_edificio["values"] = database.get_nombres_edificios()
-            if edificio_actual:
-                self.var_edificio.set(edificio_actual)
-            self._cargar_unidades()
-        VentanaAdministracion(self, self.var_edificio.get() or "", on_cambios=al_cambiar)
+        VentanaAdministracion(self, self.var_edificio.get() or "", on_cambios=self._refrescar_edificios)
 
     def _abrir_configuracion(self):
         VentanaConfiguracion(self)
 
     def _abrir_editor_datos(self):
-        def al_cambiar():
-            edificio_actual = self.var_edificio.get()
-            self.combo_edificio["values"] = database.get_nombres_edificios()
-            if edificio_actual:
-                self.var_edificio.set(edificio_actual)
-            self._cargar_unidades()
-        VentanaEditorDatos(self, on_cambios=al_cambiar)
+        VentanaEditorDatos(self, on_cambios=self._refrescar_edificios)
 
     def _abrir_historial(self):
         VentanaHistorial(self)
