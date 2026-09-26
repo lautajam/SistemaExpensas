@@ -38,7 +38,9 @@ from pdf_generator import generar_pdf_recibo
 import pagos
 from unidades import (
     BAULERA, COCHERA, DEPTO, LOCAL, TIPOS, TIPOS_ASOCIABLES,
-    depto_de, etiqueta_unidad, indice_por_id, nombre_tipo, normalizar_tipo, ordenar_con_asociadas,
+    depto_de, descripcion_asociadas, etiqueta_unidad, indice_por_id, nombre_tipo, normalizar_tipo,
+    MODO_APARTE, MODO_JUNTO, MODO_TOTAL, asociadas_que_pagan_junto, incluida_en_total, modo_pago,
+    ordenar_con_asociadas, ordenar_para_pantalla, paga_junto,
 )
 
 COLOR_FONDO = "#f4f6f8"
@@ -105,6 +107,35 @@ def confirmar_y_borrar(parent, unidad_id):
     return True
 
 
+# Cómo paga una cochera/baulera de un depto: (código guardado, texto para elegir, texto corto de la lista)
+MODOS_PAGO = [
+    (MODO_APARTE, "Recibo aparte", "recibo aparte"),
+    (MODO_JUNTO, "Paga junto con el depto (tiene su fila en la planilla)", "paga junto"),
+    (MODO_TOTAL, "Incluida en el total del depto (sin fila ni celda propia)", "incluida en el total"),
+]
+_TEXTO_MODO = {cod: largo for cod, largo, _corto in MODOS_PAGO}
+_CORTO_MODO = {cod: corto for cod, _largo, corto in MODOS_PAGO}
+_CODIGO_MODO = {largo: cod for cod, largo, _corto in MODOS_PAGO}
+
+
+def confirmar_modo_celdas(parent, edificio):
+    """
+    Si el edificio todavía no usa celdas, avisa lo que cambia al asignar la primera:
+    la app deja de armar y tocar su planilla y solo la lee tal cual. True si sigue.
+    """
+    if pagos.modo_celdas(database.get_unidades_por_edificio(edificio)):
+        return True
+    return messagebox.askyesno(
+        "Planilla con celdas",
+        f"Al asignar una celda, la planilla de pagos de «{edificio}» pasa a usarse tal cual está: "
+        "la app deja de modificarla y lee los montos de la celda de cada unidad.\n\n"
+        f"El archivo tiene que estar en:\n{pagos.ruta_pagos_edificio(edificio)}\n\n"
+        "Las unidades sin celda no van a poder generar recibo hasta que se les asigne una.\n\n"
+        "¿Continuar?",
+        icon="warning", parent=parent,
+    )
+
+
 class DialogoAsociada(tk.Toplevel):
     """Mini formulario para sumar una cochera o baulera a un depto."""
 
@@ -127,7 +158,9 @@ class DialogoAsociada(tk.Toplevel):
         self.var_piso = tk.StringVar()
         self.var_dueno = tk.StringVar()
         self.var_importe = tk.StringVar(value="0")
+        self.var_celda = tk.StringVar()
         campos = [
+            ("Celda en la planilla (ej. B12):", self.var_celda),
             ("Número (ej: 3):", self.var_unidad),
             ("Unidad funcional (UF):", self.var_uf),
             ("Piso (opcional):", self.var_piso),
@@ -138,13 +171,19 @@ class DialogoAsociada(tk.Toplevel):
             tk.Label(cont, text=etiqueta, font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(row=i, column=0, sticky="w", pady=4)
             entry = tk.Entry(cont, textvariable=var, width=22, font=FUENTE_NORMAL)
             entry.grid(row=i, column=1, pady=4, padx=(10, 0))
-            if i == 0:
+            if i == 1:
                 entry.focus_set()
 
         tk.Label(cont, text="El inquilino es el del depto.", font=("Segoe UI", 8), fg="#666666",
                  bg=COLOR_FONDO).grid(row=len(campos), column=0, columnspan=2, sticky="w")
+        tk.Label(cont, text="Cómo paga:", font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(
+            row=len(campos) + 1, column=0, sticky="w", pady=(6, 0))
+        self.var_modo = tk.StringVar(value=_TEXTO_MODO[MODO_APARTE])
+        ttk.Combobox(cont, textvariable=self.var_modo, state="readonly", width=20, font=FUENTE_NORMAL,
+                     values=[largo for _c, largo, _k in MODOS_PAGO]).grid(
+            row=len(campos) + 1, column=1, pady=(6, 0), padx=(10, 0), sticky="w")
         botones = tk.Frame(cont, bg=COLOR_FONDO)
-        botones.grid(row=len(campos) + 1, column=0, columnspan=2, pady=(14, 0))
+        botones.grid(row=len(campos) + 2, column=0, columnspan=2, pady=(14, 0))
         tk.Button(botones, text="Agregar", command=self._agregar, bg=COLOR_PRIMARIO,
                   fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
         tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
@@ -154,6 +193,12 @@ class DialogoAsociada(tk.Toplevel):
         if not numero:
             messagebox.showwarning("Datos incompletos", "Completá el número.", parent=self)
             return
+        try:
+            celda = pagos.normalizar_celda(self.var_celda.get())
+        except ValueError as e:
+            messagebox.showwarning("Celda inválida", str(e), parent=self)
+            return
+        modo = _CODIGO_MODO[self.var_modo.get()]
         self.on_agregar({
             "tipo": self.tipo,
             "unidad": numero,
@@ -161,9 +206,48 @@ class DialogoAsociada(tk.Toplevel):
             "piso": self.var_piso.get().strip(),
             "dueno": self.var_dueno.get().strip(),
             "importe": parse_importe(self.var_importe.get()),
+            "paga_junto": modo,
+            "celda": "" if modo == MODO_TOTAL else celda,
         })
         self.destroy()
 
+
+class DialogoElegirAsociada(tk.Toplevel):
+    """Lista de cocheras/bauleras ya creadas para sumarlas a un depto."""
+
+    def __init__(self, parent, candidatas, on_elegir):
+        super().__init__(parent)
+        self.candidatas = candidatas
+        self.on_elegir = on_elegir
+
+        self.title("Vincular existente")
+        self.configure(bg=COLOR_FONDO)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
+        cont.pack(fill="both", expand=True)
+        tk.Label(cont, text="Cocheras y bauleras sueltas (podés elegir varias):", font=FUENTE_BOLD,
+                 bg=COLOR_FONDO).pack(anchor="w")
+        self.lista = tk.Listbox(cont, height=min(10, max(3, len(candidatas))), width=34, font=FUENTE_NORMAL,
+                                selectmode="extended", exportselection=False)
+        for _id, nombre in candidatas:
+            self.lista.insert("end", nombre)
+        self.lista.pack(fill="x", pady=(6, 0))
+        botones = tk.Frame(cont, bg=COLOR_FONDO)
+        botones.pack(pady=(14, 0))
+        tk.Button(botones, text="Vincular", command=self._elegir, bg=COLOR_PRIMARIO,
+                  fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
+        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+
+    def _elegir(self):
+        seleccion = self.lista.curselection()
+        if not seleccion:
+            messagebox.showinfo("Vincular existente", "Elegí al menos una de la lista.", parent=self)
+            return
+        self.on_elegir([self.candidatas[i] for i in seleccion])
+        self.destroy()
 
 class DialogoUnidad(tk.Toplevel):
     def __init__(self, parent, edificio, unidad=None, on_guardar=None):
@@ -171,7 +255,8 @@ class DialogoUnidad(tk.Toplevel):
         self.edificio = edificio
         self.unidad = unidad  # dict si es edición, None si es alta
         self.on_guardar = on_guardar
-        self._asociadas = []        # cocheras/bauleras a crear junto con este depto
+        self._items = []            # lo que muestra la lista de cocheras/bauleras (ver _agregar_item)
+        self._a_desvincular = []    # ids de asociadas a soltar del depto al guardar
         self._autoinquilino = ""    # último inquilino copiado automáticamente desde el depto
 
         self.title("Editar unidad" if unidad else "Nueva unidad")
@@ -202,6 +287,7 @@ class DialogoUnidad(tk.Toplevel):
 
         tipo_actual = normalizar_tipo(unidad["tipo"]) if unidad else DEPTO
         self.var_tipo = tk.StringVar(value=nombre_tipo(tipo_actual))
+        self.var_celda = tk.StringVar(value=unidad["celda"] if unidad else "")
         self.var_piso = tk.StringVar(value=unidad["piso"] if unidad else "")
         self.var_unidad = tk.StringVar(value=unidad["unidad"] if unidad else "")
         self.var_uf = tk.StringVar(value=unidad["uf"] if unidad else "")
@@ -220,52 +306,75 @@ class DialogoUnidad(tk.Toplevel):
             tk.Entry(cont, textvariable=var, width=28, font=FUENTE_NORMAL).grid(
                 row=fila_idx, column=1, pady=4, padx=(10, 0))
 
-        etiqueta_fila(1, "Tipo de unidad:")
+        etiqueta_fila(1, "Celda en la planilla (ej. B12):")
+        entrada_fila(1, self.var_celda)
+
+        etiqueta_fila(2, "Tipo de unidad:")
         self.combo_tipo = ttk.Combobox(cont, textvariable=self.var_tipo, state="readonly", width=26,
                                        values=[nombre_tipo(t) for t in TIPOS], font=FUENTE_NORMAL)
-        self.combo_tipo.grid(row=1, column=1, pady=4, padx=(10, 0), sticky="w")
+        self.combo_tipo.grid(row=2, column=1, pady=4, padx=(10, 0), sticky="w")
         self.combo_tipo.bind("<<ComboboxSelected>>", lambda e: self._actualizar_tipo())
 
-        self.lbl_piso = etiqueta_fila(2, "")
-        entrada_fila(2, self.var_piso)
-        self.lbl_unidad = etiqueta_fila(3, "")
-        entrada_fila(3, self.var_unidad)
-        etiqueta_fila(4, "Unidad funcional (UF):")
-        entrada_fila(4, self.var_uf)
+        self.lbl_piso = etiqueta_fila(3, "")
+        entrada_fila(3, self.var_piso)
+        self.lbl_unidad = etiqueta_fila(4, "")
+        entrada_fila(4, self.var_unidad)
+        etiqueta_fila(5, "Unidad funcional (UF):")
+        entrada_fila(5, self.var_uf)
 
-        self.lbl_depto = etiqueta_fila(5, "Pertenece al depto:")
+        self.lbl_depto = etiqueta_fila(6, "Pertenece al depto:")
         self.combo_depto = ttk.Combobox(cont, textvariable=self.var_depto, state="readonly", width=26,
                                         values=list(self._ids_deptos), font=FUENTE_NORMAL)
-        self.combo_depto.grid(row=5, column=1, pady=4, padx=(10, 0), sticky="w")
+        self.combo_depto.grid(row=6, column=1, pady=4, padx=(10, 0), sticky="w")
         self.combo_depto.bind("<<ComboboxSelected>>", lambda e: self._al_elegir_depto())
 
-        etiqueta_fila(6, "Dueño:")
-        entrada_fila(6, self.var_dueno)
-        etiqueta_fila(7, "Inquilino:")
-        entrada_fila(7, self.var_inquilino)
-        etiqueta_fila(8, "Importe:")
-        entrada_fila(8, self.var_importe)
+        etiqueta_fila(7, "Dueño:")
+        entrada_fila(7, self.var_dueno)
+        etiqueta_fila(8, "Inquilino:")
+        entrada_fila(8, self.var_inquilino)
+        etiqueta_fila(9, "Importe:")
+        entrada_fila(9, self.var_importe)
 
         self.frame_asociadas = tk.Frame(cont, bg=COLOR_FONDO)
-        self.frame_asociadas.grid(row=9, column=0, columnspan=2, sticky="we", pady=(10, 0))
+        self.frame_asociadas.grid(row=10, column=0, columnspan=2, sticky="we", pady=(10, 0))
         tk.Label(self.frame_asociadas, text="Cocheras y bauleras de este depto:", font=FUENTE_BOLD,
                  bg=COLOR_FONDO).pack(anchor="w")
-        if unidad:
-            existentes = [etiqueta_unidad(h).split(" (")[0] for h, n in ordenar_con_asociadas(todas)
-                          if n == 1 and h["depto_id"] == unidad["id"]]
-            texto = ("Ya tiene: " + ", ".join(existentes)) if existentes else "Todavía no tiene cocheras ni bauleras."
-            tk.Label(self.frame_asociadas, text=texto, font=("Segoe UI", 8), fg="#666666",
-                     bg=COLOR_FONDO, wraplength=380, justify="left").pack(anchor="w")
-        self.lista_asociadas = tk.Listbox(self.frame_asociadas, height=3, font=FUENTE_NORMAL)
+        tk.Label(self.frame_asociadas, text="Elegí una y abajo cómo paga: aparte, junto con el depto (un solo recibo) "
+                 "o incluida en su total.\nQuitar la suelta del depto, no la borra.", font=("Segoe UI", 8),
+                 fg="#666666", bg=COLOR_FONDO, justify="left").pack(anchor="w")
+        self.lista_asociadas = tk.Listbox(self.frame_asociadas, height=4, font=FUENTE_NORMAL, exportselection=False)
         self.lista_asociadas.pack(fill="x", pady=(4, 4))
+        self.lista_asociadas.bind("<<ListboxSelect>>", lambda e: self._mostrar_modo_item())
+        if unidad:
+            for h, n in ordenar_con_asociadas(todas):
+                if n == 1 and h["depto_id"] == unidad["id"]:
+                    self._agregar_item("actual", etiqueta_unidad(h).split(" (")[0], modo=modo_pago(h), id=h["id"])
         barra = tk.Frame(self.frame_asociadas, bg=COLOR_FONDO)
         barra.pack(anchor="w")
-        tk.Button(barra, text="+ Cochera", command=lambda: self._nueva_asociada(COCHERA)).pack(side="left")
-        tk.Button(barra, text="+ Baulera", command=lambda: self._nueva_asociada(BAULERA)).pack(side="left", padx=6)
-        tk.Button(barra, text="Quitar", command=self._quitar_asociada).pack(side="left")
+        tk.Button(barra, text="Vincular existente", command=self._vincular_existente).pack(side="left")
+        tk.Button(barra, text="+ Cochera nueva", command=lambda: self._nueva_asociada(COCHERA)).pack(side="left", padx=6)
+        tk.Button(barra, text="+ Baulera nueva", command=lambda: self._nueva_asociada(BAULERA)).pack(side="left")
+        tk.Button(barra, text="Quitar", command=self._quitar_asociada).pack(side="left", padx=6)
+        fila_modo = tk.Frame(self.frame_asociadas, bg=COLOR_FONDO)
+        fila_modo.pack(anchor="w", pady=(6, 0))
+        tk.Label(fila_modo, text="Cómo paga la elegida:", font=FUENTE_NORMAL, bg=COLOR_FONDO).pack(side="left")
+        self.var_modo_item = tk.StringVar()
+        self.combo_modo_item = ttk.Combobox(fila_modo, textvariable=self.var_modo_item, state="readonly", width=48,
+                                            font=FUENTE_NORMAL, values=[largo for _c, largo, _k in MODOS_PAGO])
+        self.combo_modo_item.pack(side="left", padx=(8, 0))
+        self.combo_modo_item.bind("<<ComboboxSelected>>", lambda e: self._fijar_modo_item(self.var_modo_item.get()))
+
+        # Cochera/baulera: "cómo paga" propio (ocupa el lugar de la lista, que solo se ve en un depto)
+        self.fila_modo_asoc = tk.Frame(cont, bg=COLOR_FONDO)
+        self.fila_modo_asoc.grid(row=10, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        tk.Label(self.fila_modo_asoc, text="Cómo paga:", font=FUENTE_NORMAL, bg=COLOR_FONDO).pack(side="left")
+        self.var_modo_asoc = tk.StringVar(value=_TEXTO_MODO[modo_pago(unidad) if unidad else MODO_APARTE])
+        self.combo_modo_asoc = ttk.Combobox(self.fila_modo_asoc, textvariable=self.var_modo_asoc, state="readonly",
+                                            width=48, font=FUENTE_NORMAL, values=[largo for _c, largo, _k in MODOS_PAGO])
+        self.combo_modo_asoc.pack(side="left", padx=(8, 0))
 
         botones = tk.Frame(cont, bg=COLOR_FONDO)
-        botones.grid(row=10, column=0, columnspan=2, pady=(16, 0))
+        botones.grid(row=11, column=0, columnspan=2, pady=(16, 0))
         tk.Button(botones, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
                   fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
         tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
@@ -289,8 +398,17 @@ class DialogoUnidad(tk.Toplevel):
         for w in (self.lbl_depto, self.combo_depto):
             (w.grid if tipo in TIPOS_ASOCIABLES else w.grid_remove)()
         (self.frame_asociadas.grid if tipo == DEPTO else self.frame_asociadas.grid_remove)()
+        (self.fila_modo_asoc.grid if tipo in TIPOS_ASOCIABLES else self.fila_modo_asoc.grid_remove)()
+        self._actualizar_junto_asoc()
+
+    def _actualizar_junto_asoc(self):
+        con_depto = bool(self._ids_deptos.get(self.var_depto.get(), ""))
+        self.combo_modo_asoc.config(state="readonly" if con_depto else "disabled")
+        if not con_depto:
+            self.var_modo_asoc.set(_TEXTO_MODO[MODO_APARTE])
 
     def _al_elegir_depto(self):
+        self._actualizar_junto_asoc()
         depto = self._por_id.get(self._ids_deptos.get(self.var_depto.get(), ""))
         if not depto:
             return
@@ -299,19 +417,76 @@ class DialogoUnidad(tk.Toplevel):
             self.var_inquilino.set(depto["inquilino"])
         self._autoinquilino = depto["inquilino"]
 
+    @staticmethod
+    def _texto_item(it):
+        estado = {"actual": "", "vincular": "  (existente)", "nueva": "  (nueva)"}[it["estado"]]
+        return f"{it['nombre']}{estado}   ·   {_CORTO_MODO[it['modo']]}"
+
+    def _agregar_item(self, estado, nombre, modo=MODO_APARTE, **extra):
+        """
+        estado: 'actual' (ya es del depto), 'vincular' (existente que se suma) o 'nueva' (se crea al guardar).
+        modo: cómo paga (MODO_APARTE / MODO_JUNTO / MODO_TOTAL); 'modo_orig' es cómo estaba guardada.
+        """
+        self._items.append(dict(extra, estado=estado, nombre=nombre, modo=modo, modo_orig=modo))
+        self.lista_asociadas.insert("end", self._texto_item(self._items[-1]))
+
+    def _mostrar_modo_item(self):
+        seleccion = self.lista_asociadas.curselection()
+        self.var_modo_item.set(_TEXTO_MODO[self._items[seleccion[0]]["modo"]] if seleccion else "")
+
+    def _fijar_modo_item(self, texto):
+        """Cambia cómo paga la cochera/baulera elegida en la lista (texto largo del combo)."""
+        seleccion = self.lista_asociadas.curselection()
+        if not seleccion:
+            messagebox.showinfo("Cómo paga", "Elegí primero la cochera o baulera de la lista.", parent=self)
+            self.var_modo_item.set("")
+            return
+        i = seleccion[0]
+        self._items[i]["modo"] = _CODIGO_MODO[texto]
+        self.lista_asociadas.delete(i)
+        self.lista_asociadas.insert(i, self._texto_item(self._items[i]))
+        self.lista_asociadas.selection_set(i)
+
     def _nueva_asociada(self, tipo):
         DialogoAsociada(self, tipo, self._agregar_asociada)
 
     def _agregar_asociada(self, datos):
-        self._asociadas.append(datos)
         nombre = " ".join(p for p in (nombre_tipo(datos["tipo"]), datos["piso"], datos["unidad"]) if p)
-        self.lista_asociadas.insert("end", f"{nombre} — {format_currency_ar(datos['importe'])}")
+        self._agregar_item("nueva", f"{nombre} — {format_currency_ar(datos['importe'])}",
+                           modo=datos.get("paga_junto") or MODO_APARTE, datos=datos)
+
+    def _vincular_existente(self):
+        en_lista = {it["id"] for it in self._items if "id" in it}
+        propio = self.unidad["id"] if self.unidad else None
+        candidatas = [
+            (u["id"], etiqueta_unidad(u)) for u, _n in ordenar_con_asociadas(database.get_unidades_por_edificio(self.edificio))
+            if normalizar_tipo(u["tipo"]) in TIPOS_ASOCIABLES and u["id"] not in en_lista
+            and (not u["depto_id"] or u["id"] in self._a_desvincular) and u["id"] != propio
+        ]
+        if not candidatas:
+            messagebox.showinfo("Vincular existente", "No hay cocheras ni bauleras sueltas en este edificio.\n"
+                                "Podés crear una con '+ Cochera nueva' o '+ Baulera nueva'.", parent=self)
+            return
+        DialogoElegirAsociada(self, candidatas, self._agregar_vinculadas)
+
+    def _agregar_vinculadas(self, elegidas):
+        for uid, nombre in elegidas:
+            if uid in self._a_desvincular:      # la había soltado hace un rato: vuelve a quedar como estaba
+                self._a_desvincular.remove(uid)
+                self._agregar_item("actual", nombre, modo=modo_pago(self._por_id[uid]), id=uid)
+            else:
+                self._agregar_item("vincular", nombre, id=uid)
 
     def _quitar_asociada(self):
         seleccion = self.lista_asociadas.curselection()
-        if seleccion:
-            self.lista_asociadas.delete(seleccion[0])
-            del self._asociadas[seleccion[0]]
+        if not seleccion:
+            messagebox.showinfo("Quitar", "Elegí primero la cochera o baulera de la lista.", parent=self)
+            return
+        item = self._items.pop(seleccion[0])
+        self.lista_asociadas.delete(seleccion[0])
+        if item["estado"] == "actual":
+            self._a_desvincular.append(item["id"])
+        self._mostrar_modo_item()
 
     def _borrar(self):
         if confirmar_y_borrar(self, self.unidad["id"]):
@@ -333,9 +508,26 @@ class DialogoUnidad(tk.Toplevel):
             messagebox.showwarning("Datos incompletos", "Completá la letra o número de la unidad.", parent=self)
             return
 
+        try:
+            celda = pagos.normalizar_celda(self.var_celda.get())
+        except ValueError as e:
+            messagebox.showwarning("Celda inválida", str(e), parent=self)
+            return
+
         depto_id = self._ids_deptos.get(self.var_depto.get(), "") if tipo in TIPOS_ASOCIABLES else ""
-        asociadas = [dict(a, inquilino=inquilino) for a in self._asociadas] if tipo == DEPTO else []
+        items = self._items if tipo == DEPTO else []
+        asociadas = [dict(it["datos"], inquilino=inquilino, paga_junto=it["modo"]) for it in items if it["estado"] == "nueva"]
+        a_vincular = [it for it in items if it["estado"] == "vincular"]
+        a_cambiar = [it for it in items if it["estado"] == "actual" and it["modo"] != it["modo_orig"]]
         uf, dueno = self.var_uf.get().strip(), self.var_dueno.get().strip()
+        # solo una cochera/baulera de un depto tiene "cómo paga"; una incluida en el total no lleva celda propia
+        modo = _CODIGO_MODO[self.var_modo_asoc.get()] if depto_id else MODO_APARTE
+        if modo == MODO_TOTAL:
+            celda = ""
+
+        nuevas_celdas = ([celda] if celda else []) + [a["celda"] for a in asociadas if a.get("celda")]
+        if nuevas_celdas and not confirmar_modo_celdas(self, self.edificio):
+            return
 
         try:
             if self.unidad:
@@ -343,12 +535,24 @@ class DialogoUnidad(tk.Toplevel):
                     self.unidad["id"],
                     piso=piso, tipo=tipo, unidad=unidad_txt, uf=uf, dueno=dueno,
                     inquilino=inquilino, importe=str(importe), depto_id=depto_id,
+                    paga_junto=modo, celda=celda,
                 )
+                depto_propio = self.unidad["id"]
+                for asociada_id in self._a_desvincular:
+                    database.update_unidad(asociada_id, depto_id="")
                 if asociadas:
-                    database.add_asociadas(self.unidad["id"], asociadas)
+                    database.add_asociadas(depto_propio, asociadas)
             else:
-                database.add_unidad(self.edificio, piso, tipo, unidad_txt, inquilino, importe,
-                                    depto_id=depto_id, asociadas=asociadas, uf=uf, dueno=dueno)
+                depto_propio = database.add_unidad(self.edificio, piso, tipo, unidad_txt, inquilino, importe,
+                                                   depto_id=depto_id, asociadas=asociadas, uf=uf, dueno=dueno,
+                                                   paga_junto=modo, celda=celda)
+            for it in a_vincular:
+                campos = {"depto_id": depto_propio, "paga_junto": it["modo"]}
+                if not self._por_id[it["id"]]["inquilino"]:
+                    campos["inquilino"] = inquilino
+                database.update_unidad(it["id"], **campos)
+            for it in a_cambiar:
+                database.update_unidad(it["id"], paga_junto=it["modo"])
 
             mostrar_avisos()
             if self.on_guardar:
@@ -507,6 +711,109 @@ class DialogoDatosConsorcio(tk.Toplevel):
 
 
 # ===========================================================================
+# Ventana: asignar la celda de la planilla de pagos a cada unidad
+# ===========================================================================
+
+SIN_CELDA = "Sin celda"
+
+
+class VentanaAsignarCeldas(tk.Toplevel):
+    """Una fila por unidad del edificio con la celda donde figura en la planilla de pagos."""
+
+    def __init__(self, parent, edificio, on_guardar=None):
+        super().__init__(parent)
+        self.edificio = edificio
+        self.on_guardar = on_guardar
+        self.title("Asignar celdas de la planilla")
+        self.configure(bg=COLOR_FONDO)
+        self.geometry("520x560")
+        self.transient(parent)
+        self.grab_set()
+
+        tk.Label(self, text=f"Edificio: {edificio}", font=FUENTE_BOLD, bg=COLOR_FONDO).pack(
+            anchor="w", padx=16, pady=(14, 2))
+        tk.Label(
+            self, bg=COLOR_FONDO, fg="#666666", font=("Segoe UI", 8), justify="left", wraplength=480,
+            text="Escribí, para cada unidad, la celda donde está su nombre en la planilla (ej. B12). "
+                 "Los montos se leen de las 4 celdas de la derecha: Total a pagar, Monto deuda, "
+                 "Monto pagado y Tipo pago. Dejala vacía si la unidad no figura.\n"
+                 f"Archivo: {pagos.ruta_pagos_edificio(edificio)}",
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        botones = tk.Frame(self, bg=COLOR_FONDO)
+        botones.pack(side="bottom", pady=12)
+        tk.Button(botones, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
+                  fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
+        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+
+        zona = tk.Frame(self, bg=COLOR_FONDO)
+        zona.pack(fill="both", expand=True, padx=16)
+        canvas = tk.Canvas(zona, bg=COLOR_FONDO, highlightthickness=0)
+        barra = ttk.Scrollbar(zona, orient="vertical", command=canvas.yview)
+        interior = tk.Frame(canvas, bg=COLOR_FONDO)
+        interior.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=interior, anchor="nw")
+        canvas.configure(yscrollcommand=barra.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        barra.pack(side="right", fill="y")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", lambda ev: canvas.yview_scroll(-1 * (ev.delta // 120), "units")))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        todas = database.get_unidades_por_edificio(edificio)
+        por_id = indice_por_id(todas)
+        self.vars = {}
+        self._antes = {u["id"]: u["celda"] for u in todas}
+        for i, (u, nivel) in enumerate([(u, n) for u, n in ordenar_con_asociadas(todas) if not incluida_en_total(u)]):
+            texto = ("      " if nivel else "") + f"{nombre_tipo(normalizar_tipo(u['tipo']))} — {etiqueta_unidad(u, por_id)}"
+            tk.Label(interior, text=texto, font=FUENTE_NORMAL, bg=COLOR_FONDO, anchor="w", width=42).grid(
+                row=i, column=0, sticky="w", pady=2)
+            var = tk.StringVar(value=u["celda"])
+            tk.Entry(interior, textvariable=var, width=10, font=FUENTE_NORMAL).grid(row=i, column=1, padx=(8, 0), pady=2)
+            self.vars[u["id"]] = var
+        if not todas:
+            tk.Label(interior, text="Este edificio todavía no tiene unidades.", bg=COLOR_FONDO,
+                     font=FUENTE_NORMAL).grid(row=0, column=0, pady=10)
+
+    def _guardar(self):
+        try:
+            celdas = {uid: pagos.normalizar_celda(var.get()) for uid, var in self.vars.items()}
+        except ValueError as e:
+            messagebox.showwarning("Celda inválida", str(e), parent=self)
+            return
+        habia, habra = any(self._antes.values()), any(celdas.values())
+        if habra and not habia and not confirmar_modo_celdas(self, self.edificio):
+            return
+        if habia and not habra and not messagebox.askyesno(
+            "Volver a la planilla automática",
+            "Sin ninguna celda asignada, la app vuelve a armar su propia planilla de pagos en ese archivo "
+            "(antes guarda una copia de tu Excel con el nombre «..._respaldo_...»).\n\n¿Continuar?",
+            icon="warning", parent=self,
+        ):
+            return
+        try:
+            database.set_celdas(self.edificio, celdas)
+        except ValueError as e:
+            messagebox.showwarning("No se pudo guardar", str(e), parent=self)
+            return
+        except Exception as e:
+            manejar_error("No se pudieron guardar las celdas", e)
+            return
+        if habia and not habra:
+            try:
+                database.sincronizar_pagos(self.edificio, reemplazar_ajena=True)
+            except PermissionError:
+                messagebox.showwarning(
+                    "Planilla abierta",
+                    "Se quitaron las celdas, pero la planilla está abierta en Excel y no se pudo rearmar.\n"
+                    "Cerrala: se rearma sola la próxima vez que se guarde algo.", parent=self)
+            except Exception as e:
+                manejar_error("No se pudo rearmar la planilla de pagos", e)
+        if self.on_guardar:
+            self.on_guardar()
+        self.destroy()
+
+
+# ===========================================================================
 # Ventana: administración de edificios / unidades
 # ===========================================================================
 
@@ -535,13 +842,15 @@ class VentanaAdministracion(tk.Toplevel):
                   bg=COLOR_PRIMARIO, fg="white", font=FUENTE_BOLD).pack(side="left", padx=6)
         tk.Button(top, text="+ Nuevo edificio", command=self._nuevo_edificio).pack(side="left", padx=6)
         tk.Button(top, text="+ Nueva unidad", command=self._nueva_unidad).pack(side="left", padx=6)
+        tk.Button(top, text="Asignar celdas", command=self._asignar_celdas).pack(side="left", padx=6)
         tk.Button(top, text="Abrir carpeta del edificio", command=self._abrir_carpeta).pack(side="left", padx=6)
 
-        columnas = ("piso", "tipo", "unidad", "uf", "depto", "dueno", "inquilino", "importe")
+        columnas = ("piso", "tipo", "unidad", "uf", "depto", "dueno", "inquilino", "importe", "celda")
         self.tree = ttk.Treeview(self, columns=columnas, show="headings", height=16)
         titulos = {"piso": "PISO", "tipo": "TIPO", "unidad": "LETRA/N°", "uf": "UF", "depto": "PERTENECE A",
-                   "dueno": "DUEÑO", "inquilino": "INQUILINO", "importe": "IMPORTE"}
-        anchos = {"piso": 60, "tipo": 80, "unidad": 80, "uf": 50, "depto": 90, "dueno": 130, "inquilino": 130, "importe": 100}
+                   "dueno": "DUEÑO", "inquilino": "INQUILINO", "importe": "IMPORTE", "celda": "CELDA"}
+        anchos = {"piso": 60, "tipo": 80, "unidad": 80, "uf": 50, "depto": 90, "dueno": 130, "inquilino": 130,
+                  "importe": 100, "celda": 60}
         for c in columnas:
             self.tree.heading(c, text=titulos[c])
             self.tree.column(c, width=anchos[c], anchor="w" if c in ("dueno", "inquilino") else "center")
@@ -572,12 +881,19 @@ class VentanaAdministracion(tk.Toplevel):
             depto = depto_de(u, por_id)
             iid = self.tree.insert("", "end", iid=u["id"], values=(
                 u["piso"], normalizar_tipo(u["tipo"]), ("↳ " if nivel else "") + u["unidad"], u["uf"],
-                etiqueta_unidad(depto) if depto else "", u["dueno"], u["inquilino"], importe_fmt,
+                etiqueta_unidad(depto) if depto else "", u["dueno"], u["inquilino"], importe_fmt, u["celda"],
             ))
             self._unidades_por_iid[iid] = u
 
         if self.on_cambios:
             self.on_cambios(edificio)
+
+    def _asignar_celdas(self):
+        edificio = self.var_edificio.get()
+        if not edificio:
+            messagebox.showwarning("Atención", "Primero seleccioná o creá un edificio.")
+            return
+        VentanaAsignarCeldas(self, edificio, on_guardar=self._recargar)
 
     def _datos_consorcio(self):
         edificio = self.var_edificio.get()
@@ -1198,18 +1514,37 @@ class App(tk.Tk):
         tk.Button(panel, text="Actualizar montos desde planilla", command=self._actualizar_desde_planilla,
                   bg=COLOR_PRIMARIO, fg="white", font=FUENTE_BOLD, padx=10, pady=3).pack(side="left")
 
+    @staticmethod
+    def _crear_circulo(relleno, borde, tam=14):
+        """Imagen de un círculo de color (los emojis de Tk en Windows salen en blanco y negro)."""
+        img = tk.PhotoImage(width=tam, height=tam)
+        c, radio = (tam - 1) / 2, tam / 2
+        for x in range(tam):
+            for y in range(tam):
+                d = ((x - c) ** 2 + (y - c) ** 2) ** 0.5
+                if d <= radio - 1.2:
+                    img.put(relleno, to=(x, y))
+                elif d <= radio:
+                    img.put(borde, to=(x, y))
+        return img
+
     def _crear_tabla(self):
         cont = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=8)
         cont.pack(fill="both", expand=True)
 
         columnas = ("sel", "piso", "tipo", "unidad", "uf", "depto", "dueno", "inquilino", "importe", "estado")
-        self.tree = ttk.Treeview(cont, columns=columnas, show="headings", selectmode="none")
+        # La columna #0 (a la izquierda) lleva el círculo verde/rojo de "recibo emitido"
+        self.tree = ttk.Treeview(cont, columns=columnas, show=("tree", "headings"), selectmode="none")
+        self.icono_emitido = self._crear_circulo("#2e9e4f", "#1b6b33")
+        self.icono_pendiente = self._crear_circulo("#e0392b", "#9c2116")
+        self.tree.heading("#0", text="RECIBO")
+        self.tree.column("#0", width=64, minwidth=64, stretch=False, anchor="center")
 
         titulos = {"sel": "", "piso": "PISO", "tipo": "TIPO", "unidad": "LETRA/N°", "uf": "UF",
-                   "depto": "PERTENECE A", "dueno": "DUEÑO", "inquilino": "INQUILINO",
+                   "depto": "RELACIÓN", "dueno": "DUEÑO", "inquilino": "INQUILINO",
                    "importe": "IMPORTE", "estado": "PAGO"}
-        anchos = {"sel": 34, "piso": 50, "tipo": 82, "unidad": 70, "uf": 45, "depto": 85,
-                  "dueno": 125, "inquilino": 125, "importe": 100, "estado": 85}
+        anchos = {"sel": 34, "piso": 50, "tipo": 78, "unidad": 65, "uf": 45, "depto": 190,
+                  "dueno": 110, "inquilino": 110, "importe": 100, "estado": 80}
         for c in columnas:
             self.tree.heading(c, text=titulos[c])
             self.tree.column(c, width=anchos[c],
@@ -1228,7 +1563,8 @@ class App(tk.Tk):
 
         ayuda = tk.Label(
             self, bg=COLOR_FONDO, fg="#666666", font=("Segoe UI", 8),
-            text="Clic en la primera columna para seleccionar/deseleccionar. Doble clic en el resto de la fila para editar la unidad.",
+            text="Clic en la casilla para seleccionar/deseleccionar. Doble clic en el resto de la fila para editar la unidad. "
+                 "RECIBO: círculo verde = ya se emitió el recibo de las expensas del período; rojo = todavía no.",
         )
         ayuda.pack(anchor="w", padx=18)
 
@@ -1276,19 +1612,43 @@ class App(tk.Tk):
             manejar_error("Error al iniciar", e)
 
     def _estados_planilla(self, edificio):
-        """{id_unidad: estado de pago} según lo guardado en la planilla; vacío si no se puede leer."""
+        """
+        {id_unidad: estado de pago} según lo guardado en la planilla; vacío si no se puede leer.
+        Con planilla por celdas, las unidades sin celda figuran como SIN_CELDA.
+        """
+        unidades = database.get_unidades_por_edificio(edificio)
         try:
-            return {uid: d["estado"] for uid, d in pagos.leer_planilla(edificio).items()}
+            estados = {uid: d["estado"] for uid, d in pagos.leer_planilla(edificio, unidades).items()}
         except Exception:
-            return {}
+            estados = {}
+        if pagos.modo_celdas(unidades):
+            estados.update({u["id"]: SIN_CELDA for u in unidades if not u["celda"] and not incluida_en_total(u)})
+        return estados
 
-    def _valores_fila(self, u, nivel, por_id, estados):
+    @staticmethod
+    def _estado_fila(u, agrupadas, estados):
+        """Estado de pago de una fila; si el depto paga todo junto, el del grupo completo."""
+        if agrupadas:
+            miembros = [estados.get(m["id"]) for m in [u] + list(agrupadas)]
+            if SIN_CELDA in miembros:
+                return SIN_CELDA
+            return pagos.estado_agregado(miembros) or ""
+        return estados.get(u["id"], "")
+
+    def _valores_fila(self, u, nivel, por_id, estados, agrupadas=()):
         depto = depto_de(u, por_id)
+        if agrupadas:
+            relacion = "con " + descripcion_asociadas(agrupadas)
+        elif depto:
+            relacion = "de " + etiqueta_unidad(depto)
+        else:
+            relacion = ""
+        importe = sum(parse_importe(m["importe"]) for m in [u] + list(agrupadas) if not incluida_en_total(m))
         return (
             MARCADO if u["id"] in self.seleccionadas else DESMARCADO,
             u["piso"], normalizar_tipo(u["tipo"]), ("↳ " if nivel else "") + u["unidad"], u["uf"],
-            etiqueta_unidad(depto) if depto else "", u["dueno"], u["inquilino"],
-            format_currency_ar(parse_importe(u["importe"])), estados.get(u["id"], ""),
+            relacion, u["dueno"], u["inquilino"],
+            format_currency_ar(importe), self._estado_fila(u, agrupadas, estados),
         )
 
     @staticmethod
@@ -1312,11 +1672,15 @@ class App(tk.Tk):
             todas = database.get_unidades_por_edificio(edificio)
             por_id = indice_por_id(todas)
             estados = self._estados_planilla(edificio)
-            for u, nivel in ordenar_con_asociadas(todas):
+            emitidos = self._claves_emitidas(edificio)
+            for u, nivel, agrupadas in ordenar_para_pantalla(todas):
                 if u["id"] in previas:
                     self.seleccionadas.add(u["id"])
-                tag = self._tag_estado(estados.get(u["id"]))
-                self.tree.insert("", "end", iid=u["id"], values=self._valores_fila(u, nivel, por_id, estados),
+                tag = self._tag_estado(self._estado_fila(u, agrupadas, estados))
+                emitido = (u["piso"], normalizar_tipo(u["tipo"]), u["unidad"]) in emitidos
+                self.tree.insert("", "end", iid=u["id"],
+                                 image=self.icono_emitido if emitido else self.icono_pendiente,
+                                 values=self._valores_fila(u, nivel, por_id, estados, agrupadas),
                                  tags=(tag,) if tag else ())
                 self._unidades_por_iid[u["id"]] = u
                 depto = depto_de(u, por_id)
@@ -1324,6 +1688,20 @@ class App(tk.Tk):
                     self._hijas_por_iid.setdefault(depto["id"], []).append(u["id"])
         except Exception as e:
             manejar_error("No se pudieron cargar las unidades", e)
+
+    @staticmethod
+    def _claves_emitidas(edificio):
+        """
+        {(piso, tipo, unidad)} de las unidades del edificio con recibo ya generado para las
+        expensas del período actual (según el historial). Un grupo «A + Cochera 6» cuenta para «A».
+        """
+        expensas_de = obtener_periodos()[0]
+        try:
+            historial = database.get_historial()
+        except Exception:
+            return set()
+        return {(r.get("piso") or "", r.get("tipo") or "", (r.get("unidad") or "").split(" + ")[0])
+                for r in historial if r.get("edificio") == edificio and r.get("expensas_de") == expensas_de}
 
     def _recargar_unidades(self):
         self._cargar_unidades(mantener_seleccion=True)
@@ -1419,8 +1797,8 @@ class App(tk.Tk):
             manejar_error("No se pudo preparar la planilla de pagos", e)
             return
         try:
-            planilla = pagos.leer_planilla(edificio)
             unidades = database.get_unidades_por_edificio(edificio)
+            planilla = pagos.leer_planilla(edificio, unidades)
             database.set_importes({u["id"]: planilla[u["id"]]["pagado"] for u in unidades if u["id"] in planilla})
         except Exception as e:
             manejar_error("No se pudieron actualizar los montos desde la planilla", e)
@@ -1428,10 +1806,12 @@ class App(tk.Tk):
 
         self._recargar_unidades()
         actualizadas = sum(1 for u in unidades if u["id"] in planilla)
-        sin_fila = [etiqueta_unidad(u, indice_por_id(unidades)) for u in unidades if u["id"] not in planilla]
+        sin_fila = [etiqueta_unidad(u, indice_por_id(unidades)) for u in unidades
+                    if u["id"] not in planilla and not incluida_en_total(u)]
         mensaje = f"Se actualizó el importe de {actualizadas} unidad(es) con el «Monto pagado» de la planilla."
         if sin_fila:
-            mensaje += "\n\nNo figuran en la planilla: " + ", ".join(sin_fila)
+            mensaje += ("\n\nSin celda asignada: " if pagos.modo_celdas(unidades) else "\n\nNo figuran en la planilla: ") \
+                + ", ".join(sin_fila)
         messagebox.showinfo("Montos actualizados", mensaje)
 
     def _abrir_planilla_pagos(self):
@@ -1478,38 +1858,71 @@ class App(tk.Tk):
             manejar_error("No se pudo preparar la planilla de pagos", e)
             return
 
+        todas_edificio = database.get_unidades_por_edificio(edificio)
         try:
-            planilla = pagos.leer_planilla(edificio)
+            planilla = pagos.leer_planilla(edificio, todas_edificio)
         except Exception as e:
             manejar_error("No se pudo leer la planilla de pagos del edificio", e)
             return
         estados_pagos = {uid: d["estado"] for uid, d in planilla.items()}
 
-        todas_edificio = database.get_unidades_por_edificio(edificio)
         por_id = indice_por_id(todas_edificio)
+        con_celdas = pagos.modo_celdas(todas_edificio)
         unidades_actuales = {u["id"]: u for u in todas_edificio}
-        gastos_por_iid = {}
+        hijas = asociadas_que_pagan_junto(todas_edificio)
+
+        # Un depto que paga todo junto genera UN solo recibo (con su cochera y baulera).
+        plan = []
         detalle = []
+        sin_celda = []
         hay_diferencias = False
         for iid in seleccionadas:
             u = unidades_actuales.get(iid)
             if not u:
                 continue
-            texto, estado = pagos.gastos_de_unidad(estados_pagos, u, mes_anterior)
-            gastos_por_iid[iid] = texto
-            importe = parse_importe(u["importe"])
+            agrupadas = hijas.get(iid, [])
+            miembros = [u] + agrupadas
+            if con_celdas and any(not m["celda"] for m in miembros if not incluida_en_total(m)):
+                # Sin celda no se sabe cuánto pagó ni el tipo de pago: no se genera el recibo.
+                sin_celda.append(etiqueta_unidad(u, por_id) + (
+                    f" (con {descripcion_asociadas(agrupadas)})" if agrupadas else ""))
+                continue
+            if agrupadas:
+                estado = pagos.estado_agregado([estados_pagos.get(m["id"]) for m in miembros])
+                texto = pagos.gastos_de_estado(estado, mes_anterior)
+            else:
+                texto, estado = pagos.gastos_de_unidad(estados_pagos, u, mes_anterior)
+            importe = sum(parse_importe(m["importe"]) for m in miembros if not incluida_en_total(m))
+            plan.append({"u": u, "agrupadas": agrupadas, "gastos_de": texto, "importe": importe,
+                         "importe_depto": parse_importe(u["importe"])})
+
+            etiqueta = etiqueta_unidad(u, por_id) + (
+                f" (con {descripcion_asociadas(agrupadas)})" if agrupadas else "")
             nota = texto if estado else f"{texto}  (no figura en la planilla de pagos)"
             nota += f"  |  {format_currency_ar(importe)}"
-            dato = planilla.get(iid)
-            if dato and abs(dato["pagado"] - importe) > 0.005:
-                nota += f"  ⚠ la planilla dice {format_currency_ar(dato['pagado'])}"
+            pagado = [planilla[m["id"]]["pagado"] for m in miembros if m["id"] in planilla]
+            if pagado and abs(sum(pagado) - importe) > 0.005:
+                nota += f"  ⚠ la planilla dice {format_currency_ar(sum(pagado))}"
                 hay_diferencias = True
-            detalle.append(f"  {etiqueta_unidad(u, por_id)}: {nota}")
+            detalle.append(f"  {etiqueta}: {nota}")
+
+        if sin_celda and not plan:
+            messagebox.showwarning(
+                "Falta asignar celdas",
+                "No se puede generar el recibo porque no se sabe cuánto pagó ni el tipo de pago: "
+                "no tienen celda asignada en la planilla.\n\n  " + "\n  ".join(sin_celda[:15]) +
+                "\n\nAsignala en Administrar → «Asignar celdas» (o editando la unidad).",
+            )
+            return
 
         max_lineas = 15
         resumen = "\n".join(detalle[:max_lineas])
         if len(detalle) > max_lineas:
             resumen += f"\n  ... y {len(detalle) - max_lineas} más"
+        aviso_celdas = (
+            "\n\nNO se generan (sin celda asignada en la planilla): " + ", ".join(sin_celda[:10])
+            + (f" y {len(sin_celda) - 10} más" if len(sin_celda) > 10 else "")
+        ) if sin_celda else ""
         aviso_montos = (
             "\n\n⚠ Hay importes distintos al «Monto pagado» de la planilla. Si querés usar los de la "
             "planilla, cancelá y apretá «Actualizar montos desde planilla»."
@@ -1517,9 +1930,9 @@ class App(tk.Tk):
 
         if not messagebox.askyesno(
             "Confirmar generación",
-            f"Se van a generar {len(seleccionadas)} recibo(s) para:\n\n{edificio}\n\n"
+            f"Se van a generar {len(plan)} recibo(s) para:\n\n{edificio}\n\n"
             f"Expensas de: {expensas_de}\nGastos de (según la planilla de pagos) e importe:\n{resumen}"
-            f"{aviso_montos}\n\n¿Confirmás?",
+            f"{aviso_montos}{aviso_celdas}\n\n¿Confirmás?",
         ):
             return
 
@@ -1531,18 +1944,18 @@ class App(tk.Tk):
             generados = []   # (registro del historial, etiqueta de la unidad)
             errores = []
 
-            for iid in seleccionadas:
-                u = unidades_actuales.get(iid)
-                if not u:
-                    continue
-                gastos_de = gastos_por_iid[iid]
+            for item in plan:
+                u, agrupadas = item["u"], item["agrupadas"]
+                gastos_de, importe_valor = item["gastos_de"], item["importe"]
                 tipo = normalizar_tipo(u["tipo"])
                 depto = depto_de(u, por_id)
                 depto_etiqueta = etiqueta_unidad(depto) if depto else ""
+                cocheras = [h for h in agrupadas if normalizar_tipo(h["tipo"]) == COCHERA]
+                bauleras = [h for h in agrupadas if normalizar_tipo(h["tipo"]) == BAULERA]
+                sufijo = "".join(f" + {etiqueta_unidad(h)}" for h in agrupadas)
                 try:
                     numero = database.get_next_numero(edificio)
                     numero_fmt = f"{numero:05d}"
-                    importe_valor = parse_importe(u["importe"])
 
                     ruta_pdf, _nombre = nombre_archivo_recibo(
                         edificio, u["piso"], u["unidad"], expensas_de, numero, carpeta_destino,
@@ -1569,6 +1982,10 @@ class App(tk.Tk):
                         "DUENO": u["dueno"],
                         "INQUILINO": u["inquilino"],
                         "IMPORTE": format_currency_ar(importe_valor),
+                        "IMPORTE_DEPTO": format_currency_ar(item["importe_depto"]),
+                        "ASOCIADAS": descripcion_asociadas(agrupadas),
+                        "COCHERAS": ", ".join(etiqueta_unidad(h) for h in cocheras),
+                        "BAULERAS": ", ".join(etiqueta_unidad(h) for h in bauleras),
                         "INMOBILIARIA_NOMBRE": inmobiliaria.get("nombre", ""),
                         "INMOBILIARIA_SUBTITULO": inmobiliaria.get("subtitulo", ""),
                         "INMOBILIARIA_DIRECCION": inmobiliaria.get("direccion", ""),
@@ -1586,21 +2003,23 @@ class App(tk.Tk):
                         "gastos_de": gastos_de,
                         "piso": u["piso"],
                         "tipo": tipo,
-                        "unidad": u["unidad"],
+                        "unidad": u["unidad"] + sufijo,
                         "inquilino": u["inquilino"],
                         "importe": f"{importe_valor:.2f}",
                         "archivo": os.path.relpath(ruta_pdf, config.BASE_DIR),
                     }
                     database.append_historial(registro)
-                    generados.append((registro, etiqueta_unidad(u, por_id)))
+                    generados.append((registro, etiqueta_unidad(u, por_id) + sufijo))
                 except Exception as e:
                     errores.append(f"{etiqueta_unidad(u, por_id)}: {e}")
 
+            self._recargar_unidades()      # los círculos de "recibo emitido" pasan a verde
+
             if generados and self.var_mostrar_lista.get():
-                VentanaRecibosGenerados(self, generados, len(seleccionadas), errores)
+                VentanaRecibosGenerados(self, generados, len(plan), errores)
                 return
 
-            mensaje = f"Se generaron {len(generados)} de {len(seleccionadas)} recibo(s).\n\nCarpeta:\n{carpeta_destino}"
+            mensaje = f"Se generaron {len(generados)} de {len(plan)} recibo(s).\n\nCarpeta:\n{carpeta_destino}"
             if errores:
                 mensaje += "\n\nUnidades con error:\n" + "\n".join(errores)
                 messagebox.showwarning("Generación con errores", mensaje)

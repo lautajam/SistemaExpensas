@@ -177,13 +177,23 @@ Cada mes, quien administra solo completa las columnas *Total a pagar,
 Monto deuda* y *Monto pagado*; *Tipo pago* es una fórmula que se calcula
 sola. No hace falta tocar nada más (no agregar ni borrar filas a mano: las
 filas las gestiona la app). Para que dé **"Total"**, *Monto pagado* debe
-ser igual a *Total a pagar* + *Monto deuda*.
+ser **mayor o igual** a *Total a pagar* + *Monto deuda*. La planilla de un
+edificio todavía sin unidades trae igual la fórmula de *Tipo pago* en la
+primera fila, para poder copiarla a otro Excel:
+`=SI(E4=0;"No pagado";SI(E4=D4;"Deuda";SI(E4>=C4+D4;"Total";"Parcial")))`.
 
 **IMPORTANTE: guardá el Excel (Ctrl+G) antes de volver a la app.** La app
 lee lo que está guardado en el archivo, no lo que está escrito en pantalla
 sin guardar. Si la planilla sigue abierta, la app te avisa antes de generar
 recibos o de actualizar montos. Cerrala también antes de agregar o borrar
 unidades, para que la app pueda actualizarla.
+
+**Columna RECIBO (pantalla principal):** un círculo **verde** indica que ya
+se generó el recibo de esa unidad para las expensas del período actual
+(según el historial) y uno **rojo** que todavía no. Se actualiza solo al
+generar recibos. Un grupo que paga junto (`1° A ... con Cochera 6`) se
+marca según el recibo del depto. Si borrás el recibo del historial o
+cambia el mes, vuelve a rojo.
 
 **Botón "Actualizar montos desde planilla"** (pantalla principal): toma el
 *Monto pagado* de cada unidad como su **importe** (el del recibo) y
@@ -210,6 +220,32 @@ solo edificio (por su nombre), y cada fila guarda el id interno de su
 unidad en una columna oculta (H). Así el vínculo es exacto: no depende de
 cómo esté escrito el piso o la letra, y sobrevive a cambios de nombre y a
 reordenar filas.
+
+#### Usar tu propia planilla (con su orden fijo) — «Celda en la planilla»
+Si la planilla ya existe con un orden que no se puede cambiar (la persona
+solo copia y pega los montos), en vez de que la app arme la suya se le
+indica **en qué celda está cada unidad**:
+
+1. Copiá tu Excel a `datos/pagos_edificios/<Edificio>_pagos.xlsx` (usa la
+   primera hoja).
+2. En cada unidad (alta o edición) completá **"Celda en la planilla"**
+   (ej. `B12`), o cargalas todas juntas en **Administrar → "Asignar
+   celdas"**. La celda es la **del nombre de la unidad** y **a su derecha**,
+   en este orden, tienen que estar: *Total a pagar*, *Monto deuda*, *Monto
+   pagado* y *Tipo pago* (si "Tipo pago" está vacío o es una fórmula sin
+   resultado guardado, la app lo calcula con la misma regla).
+3. Desde que un edificio tiene alguna celda asignada, la app **solo lee**
+   ese archivo: no lo crea, no lo reordena ni lo modifica (tampoco al
+   renombrar el consorcio; solo cambia el nombre del archivo).
+4. Las unidades **sin celda** figuran como "Sin celda" en la pantalla
+   principal y **no se les puede generar el recibo** (no se sabe cuánto
+   pagó ni el tipo de pago) hasta que se les asigne una.
+5. No puede haber dos unidades del mismo edificio con la misma celda.
+
+Si un edificio tiene en esa ruta un Excel que **no armó la app** y todavía
+no tiene celdas asignadas, la app no lo toca y lo avisa. Si quitás todas
+las celdas, la app vuelve a armar su planilla automática; antes guarda una
+copia de tu Excel como `<Edificio>_pagos_respaldo_<fecha>.xlsx`.
 
 ### Datos de cada unidad
 Piso, **letra o número** (el identificador del depto en ese piso, ej. `A`
@@ -244,6 +280,37 @@ recibo con su propia plantilla (ver sección 9).
   cualquiera por separado. Se genera **un recibo por cada unidad tildada**.
 - Un depto que tiene cocheras o bauleras no puede cambiarse a otro tipo
   hasta que se pasen a otro depto.
+- **Vincular, crear o quitar cocheras y bauleras de un depto:** en la
+  ventana de edición del depto (doble clic) hay una lista con sus cocheras y
+  bauleras y los botones **"Vincular existente"** (elegís entre las cocheras
+  y bauleras sueltas del edificio), **"+ Cochera nueva"**, **"+ Baulera
+  nueva"** y **"Quitar"**. Quitar solo las suelta del depto, no las borra.
+  Nada se aplica hasta **Guardar**.
+- **Cómo paga cada cochera o baulera** (se elige una por una, en el
+  desplegable **"Cómo paga la elegida"** de la ventana del depto, o en
+  **"Cómo paga"** de la ventana de la propia cochera/baulera; también al
+  crearla). Puede haber una de cada tipo en el mismo depto:
+  - **Recibo aparte:** su propia fila, su propio recibo y su propia fila en
+    la planilla.
+  - **Paga junto con el depto:** va en el recibo del depto, pero **tiene su
+    fila** (y su celda) en la planilla de pagos.
+  - **Incluida en el total del depto:** va en el recibo del depto y **no
+    tiene fila ni celda propia** en la planilla, porque su monto ya viene
+    en el total de la expensa del depto. No suma importe propio, no figura
+    como "Sin celda" y su estado de pago es el del depto.
+  Queda guardado hasta que lo cambies. Las que van en el recibo del depto
+  (paga junto o incluida):
+  - En la pantalla principal van **en la fila de su depto**: `1° A ... con
+    Cochera 6 y Baulera 2`, con el importe sumado y un solo estado de pago.
+    No aparecen sueltas (se editan desde el depto o desde Administrar
+    edificios/unidades). Las que pagan aparte siguen debajo del depto.
+  - Se genera **un solo recibo** (con la plantilla de depto), con el importe
+    sumado. En el historial figura como `A + Cochera 6 + Baulera 2`.
+  - **Estado de pago del grupo:** se revisan las filas del depto y de las
+    que pagan junto en la planilla de pagos (que sigue teniendo una fila por
+    unidad). Es **Total** solo si *todas* dicen Total, **No pagado** si
+    todas dicen No pagado, **Deuda** si todas dicen Deuda; cualquier otra
+    combinación es **Parcial**. Ese estado define el "Gastos de" del recibo.
 - En la planilla de pagos cada unidad tiene su fila (ej. `1° A`,
   `Cochera 3 (1° A)`), con las cocheras y bauleras debajo de su depto.
 - En `unidades.csv` el vínculo se guarda en la columna `depto_id` (el `id`
@@ -384,7 +451,11 @@ disponibles `{{TIPO}}` (DEPTO, LOCAL, COCHERA o BAULERA), `{{DEPTO}}` (el
 depto al que pertenece una cochera/baulera, ej. `1° A`; vacío si no
 tiene), `{{UF}}` (unidad funcional), `{{DUENO}}` y los datos del consorcio:
 `{{EDIFICIO_DIRECCION}}`, `{{EDIFICIO_LOCALIDAD}}`, `{{EDIFICIO_CUIT}}`,
-`{{ADMIN_NOMBRE}}`, `{{ADMIN_CUIT}}` y `{{ADMIN_RPAC}}`. Podés:
+`{{ADMIN_NOMBRE}}`, `{{ADMIN_CUIT}}` y `{{ADMIN_RPAC}}`. Para los deptos que
+pagan todo junto: `{{ASOCIADAS}}` (ej. `Cochera 6 y Baulera 2`),
+`{{COCHERAS}}`, `{{BAULERAS}}` y `{{IMPORTE_DEPTO}}` (solo el depto); en ese
+caso `{{IMPORTE}}` es el total sumado. En los demás recibos esos marcadores
+salen vacíos (`{{IMPORTE_DEPTO}}` igual a `{{IMPORTE}}`). Podés:
 
 - Cambiar textos fijos (por ejemplo el título "RECIBO N°").
 - Reordenar secciones, agregar un logo (`<img src="logo.png">`,

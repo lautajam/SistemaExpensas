@@ -20,7 +20,8 @@ from datetime import datetime
 
 import config
 import pagos
-from unidades import DEPTO, TIPOS_ASOCIABLES, normalizar_tipo
+from unidades import (DEPTO, MODO_TOTAL, TIPOS_ASOCIABLES, etiqueta_unidad, indice_por_id, normalizar_modo,
+                      normalizar_tipo)
 from utils import sanitize_filename
 
 # ---------------------------------------------------------------------------
@@ -30,9 +31,16 @@ from utils import sanitize_filename
 _AVISOS = []
 
 
-def sincronizar_pagos(nombre_edificio):
-    """Deja la planilla de pagos del edificio con una fila por unidad, en orden."""
-    return pagos.sincronizar_edificio(nombre_edificio, get_unidades_por_edificio(nombre_edificio))
+def sincronizar_pagos(nombre_edificio, reemplazar_ajena=False):
+    """
+    Deja la planilla de pagos del edificio con una fila por unidad, en orden. Si alguna
+    unidad tiene celda asignada (planilla propia), no toca el archivo y devuelve False.
+    Un Excel propio sin celdas asignadas tampoco se toca (ver pagos.sincronizar_edificio).
+    """
+    unidades = get_unidades_por_edificio(nombre_edificio)
+    if pagos.modo_celdas(unidades):
+        return False
+    return pagos.sincronizar_edificio(nombre_edificio, unidades, reemplazar_ajena=reemplazar_ajena)
 
 
 def _sincronizar_pagos_seguro(nombre_edificio):
@@ -95,7 +103,8 @@ def _append_csv(path, fieldnames, row):
 # Inicialización de datos (crea todo lo que falte, con datos de ejemplo)
 # ---------------------------------------------------------------------------
 
-UNIDADES_CAMPOS = ["id", "edificio", "piso", "tipo", "unidad", "uf", "inquilino", "dueno", "importe", "depto_id"]
+UNIDADES_CAMPOS = ["id", "edificio", "piso", "tipo", "unidad", "uf", "inquilino", "dueno", "importe",
+                   "depto_id", "paga_junto", "celda"]
 EDIFICIOS_CAMPOS = ["id", "nombre", "direccion", "localidad", "cuit",
                     "admin_nombre", "admin_cuit", "admin_rpac"]
 NUMERACION_CAMPOS = ["edificio", "ultimo_recibo"]
@@ -237,7 +246,8 @@ def update_edificio(nombre_actual, **datos):
         if carpeta_vieja != carpeta_nueva and os.path.isdir(carpeta_vieja):
             os.rename(carpeta_vieja, carpeta_nueva)
             renombrados.append((carpeta_vieja, carpeta_nueva))
-        cambio = pagos.renombrar_planilla(nombre_actual, nuevo)
+        cambio = pagos.renombrar_planilla(nombre_actual, nuevo,
+                                          actualizar_titulo=not pagos.modo_celdas(get_unidades_por_edificio(nombre_actual)))
         if cambio:
             renombrados.append(cambio)
 
@@ -316,6 +326,15 @@ def get_all_unidades():
         for campo in UNIDADES_CAMPOS:
             if u.get(campo) is None:
                 u[campo] = ""
+    # Versión anterior: la marca "paga todo junto" estaba en el depto y valía para todas
+    # sus cocheras/bauleras. Ahora está en cada cochera/baulera (se guarda en la próxima escritura).
+    juntos = {u["id"] for u in filas if normalizar_tipo(u["tipo"]) == DEPTO and str(u["paga_junto"]).strip() == "1"}
+    if juntos:
+        for u in filas:
+            if u["id"] in juntos:
+                u["paga_junto"] = ""
+            elif u["depto_id"] in juntos:
+                u["paga_junto"] = "1"
     return filas
 
 
@@ -356,16 +375,35 @@ def _filas_asociadas(depto, asociadas):
             "dueno": str(a.get("dueno", "")).strip(),
             "importe": str(a.get("importe", "0")),
             "depto_id": depto["id"],
+            "paga_junto": normalizar_modo(a.get("paga_junto")),
+            "celda": pagos.normalizar_celda(a.get("celda")),
         })
+        if filas[-1]["paga_junto"] == MODO_TOTAL:   # viene en el total del depto: sin monto ni celda propios
+            filas[-1]["importe"], filas[-1]["celda"] = "0", ""
     return filas
 
 
-def add_unidad(edificio, piso, tipo, unidad, inquilino, importe, depto_id="", asociadas=(), uf="", dueno=""):
+def _validar_celdas(unidades, edificio):
+    """Dos unidades del mismo edificio no pueden tener la misma celda de la planilla."""
+    usadas = {}
+    for u in unidades:
+        if u["edificio"] != edificio or not u["celda"]:
+            continue
+        if u["celda"] in usadas:
+            raise ValueError(f"La celda {u['celda']} está asignada a dos unidades: "
+                             f"{etiqueta_unidad(usadas[u['celda']], indice_por_id(unidades))} y "
+                             f"{etiqueta_unidad(u, indice_por_id(unidades))}.")
+        usadas[u["celda"]] = u
+
+
+def add_unidad(edificio, piso, tipo, unidad, inquilino, importe, depto_id="", asociadas=(), uf="", dueno="",
+               paga_junto=False, celda=""):
     """
     Agrega una unidad. Si es cochera/baulera, 'depto_id' indica a qué depto pertenece
     (opcional). Si es un depto, 'asociadas' es una lista de dicts
-    {tipo, piso, unidad, uf, dueno, importe} con cocheras/bauleras que se crean junto
-    con él (heredan su inquilino). Devuelve el id de la unidad creada.
+    {tipo, piso, unidad, uf, dueno, importe, celda} con cocheras/bauleras que se crean
+    junto con él (heredan su inquilino). 'celda' es la celda de la planilla de pagos
+    donde figura la unidad (opcional, ej. B12). Devuelve el id de la unidad creada.
     """
     todas = get_all_unidades()
     tipo = normalizar_tipo(tipo)
@@ -380,12 +418,17 @@ def add_unidad(edificio, piso, tipo, unidad, inquilino, importe, depto_id="", as
         "dueno": str(dueno).strip(),
         "importe": str(importe),
         "depto_id": _depto_valido(todas, edificio, tipo, depto_id),
+        "paga_junto": normalizar_modo(paga_junto) if tipo in TIPOS_ASOCIABLES and depto_id else "",
+        "celda": pagos.normalizar_celda(celda),
     }
+    if nueva["paga_junto"] == MODO_TOTAL:
+        nueva["importe"], nueva["celda"] = "0", ""
     todas.append(nueva)
     if asociadas:
         if tipo != DEPTO:
             raise ValueError("Solo un depto puede tener cocheras o bauleras asociadas.")
         todas.extend(_filas_asociadas(nueva, asociadas))
+    _validar_celdas(todas, edificio)
     _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
     _sincronizar_pagos_seguro(edificio)
     return nueva["id"]
@@ -398,6 +441,7 @@ def add_asociadas(depto_id, asociadas):
     if depto is None or normalizar_tipo(depto["tipo"]) != DEPTO:
         raise ValueError("El depto indicado no existe.")
     todas.extend(_filas_asociadas(depto, asociadas))
+    _validar_celdas(todas, depto["edificio"])
     _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
     _sincronizar_pagos_seguro(depto["edificio"])
 
@@ -422,6 +466,12 @@ def update_unidad(unidad_id, **campos):
             "antes de cambiarle el tipo."
         )
     u["depto_id"] = _depto_valido(todas, u["edificio"], u["tipo"], u["depto_id"])
+    # "Paga junto con su depto": solo tiene sentido en una cochera/baulera que pertenece a un depto.
+    u["paga_junto"] = normalizar_modo(u["paga_junto"]) if u["depto_id"] else ""
+    u["celda"] = pagos.normalizar_celda(u["celda"])
+    if u["paga_junto"] == MODO_TOTAL:   # viene en el total del depto: sin monto ni celda propios
+        u["importe"], u["celda"] = "0", ""
+    _validar_celdas(todas, u["edificio"])
 
     # Si cambia el inquilino de un depto, lo heredan sus cocheras/bauleras que tenían el mismo.
     if u["tipo"] == DEPTO and u["inquilino"] != inquilino_anterior:
@@ -432,6 +482,21 @@ def update_unidad(unidad_id, **campos):
     _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
     for nombre in edificios_afectados:
         _sincronizar_pagos_seguro(nombre)
+
+
+def set_celdas(edificio, celdas_por_id):
+    """
+    Fija la celda de la planilla de pagos de cada unidad indicada ({id: celda}; vacío la
+    quita), sin tocar el resto. Lanza ValueError si una celda es inválida o está repetida.
+    Nunca modifica el archivo de la planilla.
+    """
+    todas = get_all_unidades()
+    for u in todas:
+        if u["edificio"] == edificio and u["id"] in celdas_por_id:
+            u["celda"] = "" if normalizar_modo(u["paga_junto"]) == MODO_TOTAL and u["depto_id"] \
+                else pagos.normalizar_celda(celdas_por_id[u["id"]])
+    _validar_celdas(todas, edificio)
+    _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
 
 
 def set_importes(importes_por_id):

@@ -86,6 +86,66 @@ def _clave_asociada(u):
     return (_ORDEN_TIPO[normalizar_tipo(u.get("tipo"))], _clave_piso(u.get("piso")), _natural(u.get("unidad")))
 
 
+# Cómo paga una cochera/baulera que pertenece a un depto (columna paga_junto de unidades.csv)
+MODO_APARTE, MODO_JUNTO, MODO_TOTAL = "", "1", "T"
+
+
+def normalizar_modo(valor):
+    """Devuelve MODO_TOTAL, MODO_JUNTO o MODO_APARTE a partir de lo guardado (o de un True/False)."""
+    v = str(valor if valor is not None else "").strip().upper()
+    return MODO_TOTAL if v == "T" else MODO_JUNTO if v in ("1", "TRUE") else MODO_APARTE
+
+
+def modo_pago(u):
+    """
+    'recibo aparte' (MODO_APARTE), 'paga junto con su depto' (MODO_JUNTO: un solo recibo, pero tiene
+    su propia fila en la planilla) o 'incluida en el total del depto' (MODO_TOTAL: un solo recibo y sin
+    fila propia, porque su monto ya viene en el total del depto). Solo una cochera/baulera con depto.
+    """
+    if normalizar_tipo(u.get("tipo")) not in TIPOS_ASOCIABLES or not u.get("depto_id"):
+        return MODO_APARTE
+    return normalizar_modo(u.get("paga_junto"))
+
+
+def paga_junto(u):
+    """True si la cochera/baulera va en el mismo recibo que su depto (paga junto o incluida en el total)."""
+    return modo_pago(u) != MODO_APARTE
+
+
+def incluida_en_total(u):
+    """True si su monto ya viene en el total del depto: no tiene fila propia en la planilla."""
+    return modo_pago(u) == MODO_TOTAL
+
+
+def descripcion_asociadas(asociadas):
+    """'Cochera 6 y Baulera 2' / 'Cochera 6, Cochera 7 y Baulera 2' (vacío si no hay)."""
+    textos = [etiqueta_unidad(h) for h in asociadas]
+    if len(textos) <= 1:
+        return "".join(textos)
+    return ", ".join(textos[:-1]) + " y " + textos[-1]
+
+
+def ordenar_para_pantalla(unidades):
+    """
+    Como ordenar_con_asociadas, pero las cocheras y bauleras marcadas como 'paga junto con
+    su depto' no aparecen sueltas: van en la fila de su depto. Devuelve
+    [(unidad, nivel, agrupadas)], donde 'agrupadas' son las que ese depto paga junto.
+    """
+    ordenadas = ordenar_con_asociadas(unidades)
+    hijas = asociadas_que_pagan_junto(unidades)
+    return [(u, nivel, hijas.get(u["id"], [])) for u, nivel in ordenadas
+            if not (nivel == 1 and paga_junto(u))]
+
+
+def asociadas_que_pagan_junto(unidades):
+    """{id_depto: [cocheras/bauleras que paga junto con él]}, en el orden de ordenar_con_asociadas."""
+    hijas = {}
+    for u, nivel in ordenar_con_asociadas(unidades):
+        if nivel == 1 and paga_junto(u):
+            hijas.setdefault(u["depto_id"], []).append(u)
+    return hijas
+
+
 def ordenar_con_asociadas(unidades):
     """
     Devuelve [(unidad, nivel)] en orden: por piso y unidad, con cada depto
