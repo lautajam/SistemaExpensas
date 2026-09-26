@@ -31,6 +31,8 @@ from utils import (
     fecha_hoy_es,
     nombre_archivo_recibo,
     abrir_carpeta_en_explorador,
+    abrir_pdf,
+    revelar_en_explorador,
 )
 from pdf_generator import generar_pdf_recibo
 
@@ -129,6 +131,7 @@ class DialogoUnidad(tk.Toplevel):
             self.destroy()
         except Exception as e:
             manejar_error("No se pudo guardar la unidad", e)
+
 
 # ===========================================================================
 # Diálogo: alta de edificio
@@ -271,6 +274,201 @@ class VentanaAdministracion(tk.Toplevel):
 
 
 # ===========================================================================
+# Diálogo genérico: alta / edición de una fila de cualquier tabla CSV
+# ===========================================================================
+
+class DialogoFilaGenerica(tk.Toplevel):
+    """
+    Formulario genérico que muestra un Entry por cada columna de la tabla
+    (sin ningún formateo ni validación especial: es una edición "cruda",
+    equivalente a editar la celda directamente en el CSV/Excel).
+    """
+
+    def __init__(self, parent, titulo, campos, valores=None, on_guardar=None,
+                 campos_solo_lectura=None):
+        super().__init__(parent)
+        self.campos = campos
+        self.valores = valores or {}
+        self.on_guardar = on_guardar
+        self.campos_solo_lectura = set(campos_solo_lectura or [])
+
+        self.title(titulo)
+        self.configure(bg=COLOR_FONDO)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
+        cont.pack(fill="both", expand=True)
+
+        self.vars = {}
+        for i, campo in enumerate(campos):
+            tk.Label(cont, text=campo.replace("_", " ").upper() + ":",
+                     font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(row=i, column=0, sticky="w", pady=4)
+            var = tk.StringVar(value=str(self.valores.get(campo, "")))
+            estado = "readonly" if campo in self.campos_solo_lectura else "normal"
+            entry = tk.Entry(cont, textvariable=var, width=34, font=FUENTE_NORMAL, state=estado)
+            entry.grid(row=i, column=1, pady=4, padx=(10, 0))
+            self.vars[campo] = var
+
+        botones = tk.Frame(cont, bg=COLOR_FONDO)
+        botones.grid(row=len(campos), column=0, columnspan=2, pady=(16, 0))
+        tk.Button(botones, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
+                   fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
+        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+
+    def _guardar(self):
+        fila = {campo: var.get() for campo, var in self.vars.items()}
+        if self.on_guardar:
+            self.on_guardar(fila)
+        self.destroy()
+
+
+# ===========================================================================
+# Ventana: editor de datos (CSV) genérico
+# ===========================================================================
+
+class VentanaEditorDatos(tk.Toplevel):
+    """
+    Pantalla para ver y modificar directamente las tablas CSV de:
+    Edificios, Unidades, Inmobiliaria e Historial.
+
+    A propósito NO incluye "numeracion.csv": ese archivo es de uso interno
+    del programa (numeración correlativa de recibos) y no debe editarse
+    a mano para evitar duplicar o saltear números de recibo.
+    """
+
+    def __init__(self, parent, on_cambios=None):
+        super().__init__(parent)
+        self.on_cambios = on_cambios
+        self.title("Editor de datos (CSV)")
+        self.configure(bg=COLOR_FONDO)
+        self.geometry("920x520")
+        self.transient(parent)
+
+        self._campos_actuales = []
+        self._filas_actuales = []
+
+        top = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=10)
+        top.pack(fill="x")
+
+        tk.Label(top, text="Tabla:", font=FUENTE_BOLD, bg=COLOR_FONDO).pack(side="left")
+        self._tablas = database.listar_tablas_editables()
+        self.var_tabla = tk.StringVar(value=self._tablas[0][1])
+        combo = ttk.Combobox(
+            top, textvariable=self.var_tabla,
+            values=[etiqueta for _clave, etiqueta in self._tablas],
+            state="readonly", width=26,
+        )
+        combo.pack(side="left", padx=8)
+        combo.bind("<<ComboboxSelected>>", lambda e: self._cargar_tabla())
+
+        tk.Button(top, text="+ Agregar fila", command=self._agregar_fila).pack(side="left", padx=6)
+        tk.Button(top, text="Editar fila", command=self._editar_fila).pack(side="left", padx=6)
+        tk.Button(top, text="Eliminar fila", command=self._eliminar_fila).pack(side="left", padx=6)
+        tk.Button(top, text="Recargar", command=self._cargar_tabla).pack(side="left", padx=6)
+
+        aviso = tk.Label(
+            self, bg="#fff6e0", fg="#7a5c00", font=("Segoe UI", 8), anchor="w", justify="left",
+            text=("Los cambios se guardan al instante en el archivo CSV correspondiente. "
+                  "Editá con cuidado: por ejemplo, el nombre de un edificio debe escribirse "
+                  "exactamente igual en 'Edificios' y en 'Unidades' para que sigan relacionados."),
+        )
+        aviso.pack(fill="x", padx=16, pady=(0, 6))
+
+        self.tree = ttk.Treeview(self, show="headings", height=18)
+        self.tree.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        self.tree.bind("<Double-1>", lambda e: self._editar_fila())
+
+        self._clave_actual = None
+        self._cargar_tabla()
+
+    def _clave_de_etiqueta(self, etiqueta):
+        for clave, et in self._tablas:
+            if et == etiqueta:
+                return clave
+        return self._tablas[0][0]
+
+    def _cargar_tabla(self):
+        clave = self._clave_de_etiqueta(self.var_tabla.get())
+        self._clave_actual = clave
+        try:
+            campos, filas = database.leer_tabla(clave)
+        except Exception as e:
+            manejar_error("No se pudo leer la tabla", e)
+            return
+
+        self._campos_actuales = campos
+        self._filas_actuales = filas
+
+        self.tree.delete(*self.tree.get_children())
+        self.tree["columns"] = campos
+        for c in campos:
+            self.tree.heading(c, text=c.upper())
+            ancho = 260 if c in ("inquilino", "nombre", "direccion", "archivo") else 120
+            self.tree.column(c, width=ancho, anchor="w")
+
+        for idx, fila in enumerate(filas):
+            valores = [fila.get(c, "") for c in campos]
+            self.tree.insert("", "end", iid=str(idx), values=valores)
+
+    def _fila_seleccionada_idx(self):
+        seleccion = self.tree.selection()
+        if not seleccion:
+            messagebox.showinfo("Editor de datos", "Seleccioná primero una fila de la lista.")
+            return None
+        return int(seleccion[0])
+
+    def _guardar_y_refrescar(self):
+        try:
+            database.guardar_tabla(self._clave_actual, self._filas_actuales)
+        except Exception as e:
+            manejar_error("No se pudo guardar la tabla", e)
+            return
+        self._cargar_tabla()
+        if self.on_cambios:
+            self.on_cambios()
+
+    def _agregar_fila(self):
+        def al_guardar(fila_nueva):
+            self._filas_actuales.append(fila_nueva)
+            self._guardar_y_refrescar()
+
+        DialogoFilaGenerica(
+            self, f"Agregar fila – {self.var_tabla.get()}",
+            self._campos_actuales, valores=None, on_guardar=al_guardar,
+        )
+
+    def _editar_fila(self):
+        idx = self._fila_seleccionada_idx()
+        if idx is None:
+            return
+        fila_actual = self._filas_actuales[idx]
+
+        def al_guardar(fila_editada):
+            self._filas_actuales[idx] = fila_editada
+            self._guardar_y_refrescar()
+
+        DialogoFilaGenerica(
+            self, f"Editar fila – {self.var_tabla.get()}",
+            self._campos_actuales, valores=fila_actual, on_guardar=al_guardar,
+        )
+
+    def _eliminar_fila(self):
+        idx = self._fila_seleccionada_idx()
+        if idx is None:
+            return
+        if not messagebox.askyesno("Confirmar eliminación",
+                                    "¿Eliminar esta fila? Esta acción no se puede deshacer."):
+            return
+        try:
+            del self._filas_actuales[idx]
+            self._guardar_y_refrescar()
+        except Exception as e:
+            manejar_error("No se pudo eliminar la fila", e)
+
+
+# ===========================================================================
 # Ventana: configuración de la inmobiliaria
 # ===========================================================================
 
@@ -357,31 +555,73 @@ class VentanaHistorial(tk.Toplevel):
             "piso": 55, "unidad": 55, "inquilino": 150, "importe": 90, "archivo": 260,
         }
 
-        self.tree = ttk.Treeview(self, columns=columnas, show="headings", height=18)
+        self.tree = ttk.Treeview(self, columns=columnas, show="headings", height=16)
         for c in columnas:
             self.tree.heading(c, text=titulos[c])
             self.tree.column(c, width=anchos[c], anchor="w")
-        self.tree.pack(fill="both", expand=True, padx=16, pady=(4, 16))
+        self.tree.pack(fill="both", expand=True, padx=16, pady=(4, 8))
+        self.tree.bind("<Double-1>", lambda e: self._abrir_pdf_seleccionado())
 
+        pie = tk.Frame(self, bg=COLOR_FONDO, padx=16)
+        pie.pack(fill="x", pady=(0, 12))
+        tk.Button(pie, text="Abrir PDF", command=self._abrir_pdf_seleccionado,
+                  bg=COLOR_PRIMARIO, fg="white", font=FUENTE_BOLD, padx=12, pady=4).pack(side="left")
+        tk.Button(pie, text="Mostrar en carpeta", command=self._mostrar_en_carpeta,
+                  padx=12, pady=4).pack(side="left", padx=8)
+        tk.Label(pie, text="(doble clic en una fila también abre el PDF)", bg=COLOR_FONDO,
+                 fg="#666666", font=("Segoe UI", 8)).pack(side="left", padx=10)
+
+        self._archivo_por_iid = {}
         self._recargar()
 
     def _recargar(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
+        self._archivo_por_iid = {}
 
         filtro = self.var_filtro.get()
         historial = database.get_historial()
         historial.sort(key=lambda r: r.get("numero_recibo", ""), reverse=True)
 
+        contador = 0
         for r in historial:
             if filtro != "(Todos)" and r.get("edificio") != filtro:
                 continue
             importe_fmt = format_currency_ar(parse_importe(r.get("importe", "0")))
-            self.tree.insert("", "end", values=(
+            iid = str(contador)
+            contador += 1
+            self.tree.insert("", "end", iid=iid, values=(
                 r.get("numero_recibo", ""), r.get("edificio", ""), r.get("fecha", ""),
                 r.get("expensas_de", ""), r.get("piso", ""), r.get("unidad", ""),
                 r.get("inquilino", ""), importe_fmt, r.get("archivo", ""),
             ))
+            self._archivo_por_iid[iid] = r.get("archivo", "")
+
+    def _ruta_absoluta_seleccionada(self):
+        seleccion = self.tree.selection()
+        if not seleccion:
+            messagebox.showinfo("Historial", "Seleccioná primero un recibo de la lista.")
+            return None
+        archivo_rel = self._archivo_por_iid.get(seleccion[0], "")
+        if not archivo_rel:
+            messagebox.showwarning("Historial", "Este registro no tiene un archivo asociado.")
+            return None
+        return os.path.join(config.BASE_DIR, archivo_rel)
+
+    def _abrir_pdf_seleccionado(self):
+        ruta = self._ruta_absoluta_seleccionada()
+        if not ruta:
+            return
+        ok, mensaje_error = abrir_pdf(ruta)
+        if not ok:
+            messagebox.showwarning("No se pudo abrir el PDF", mensaje_error)
+
+    def _mostrar_en_carpeta(self):
+        ruta = self._ruta_absoluta_seleccionada()
+        if not ruta:
+            return
+        if not revelar_en_explorador(ruta):
+            messagebox.showinfo("Ubicación del archivo", ruta)
 
 
 # ===========================================================================
@@ -423,6 +663,8 @@ class App(tk.Tk):
         menu_admin = tk.Menu(menubar, tearoff=0)
         menu_admin.add_command(label="Administrar edificios/unidades", command=self._abrir_administracion)
         menu_admin.add_command(label="Configuración de la inmobiliaria", command=self._abrir_configuracion)
+        menu_admin.add_separator()
+        menu_admin.add_command(label="Editor de datos (CSV)", command=self._abrir_editor_datos)
         menubar.add_cascade(label="Administrar", menu=menu_admin)
 
         menu_ver = tk.Menu(menubar, tearoff=0)
@@ -743,6 +985,15 @@ class App(tk.Tk):
 
     def _abrir_configuracion(self):
         VentanaConfiguracion(self)
+
+    def _abrir_editor_datos(self):
+        def al_cambiar():
+            edificio_actual = self.var_edificio.get()
+            self.combo_edificio["values"] = database.get_nombres_edificios()
+            if edificio_actual:
+                self.var_edificio.set(edificio_actual)
+            self._cargar_unidades()
+        VentanaEditorDatos(self, on_cambios=al_cambiar)
 
     def _abrir_historial(self):
         VentanaHistorial(self)

@@ -11,6 +11,8 @@ Funciones auxiliares reutilizadas en todo el proyecto:
 
 import os
 import re
+import subprocess
+import webbrowser
 from datetime import date
 
 import config
@@ -164,3 +166,54 @@ def abrir_carpeta_en_explorador(ruta):
         return False
     except Exception:
         return False
+
+
+def abrir_pdf(ruta_absoluta):
+    """
+    Abre un PDF con el visor/navegador predeterminado de Windows para
+    archivos .pdf (en la mayoría de las instalaciones actuales de Windows
+    esto es el navegador: Edge, Chrome, etc., si está configurado como
+    visor de PDF por defecto).
+
+    Devuelve (True, None) si se pudo abrir, o (False, mensaje) si no,
+    para que quien llama pueda mostrarle al usuario la ruta del archivo
+    como alternativa.
+    """
+    if not ruta_absoluta or not os.path.isfile(ruta_absoluta):
+        return False, f"No se encontró el archivo en:\n{ruta_absoluta}"
+    try:
+        os.startfile(ruta_absoluta)  # usa el programa predeterminado (Windows)
+        return True, None
+    except AttributeError:
+        # No estamos en Windows: intentamos como último recurso con el navegador
+        try:
+            uri = "file:///" + ruta_absoluta.replace("\\", "/")
+            if webbrowser.open(uri):
+                return True, None
+        except Exception:
+            pass
+        return False, f"No se pudo abrir automáticamente. Ruta del archivo:\n{ruta_absoluta}"
+    except Exception as e:
+        return False, f"{e}\n\nRuta del archivo:\n{ruta_absoluta}"
+
+
+def revelar_en_explorador(ruta_absoluta):
+    """
+    Abre el Explorador de Windows mostrando (con el archivo ya
+    seleccionado) la carpeta que lo contiene. Si no es Windows o falla,
+    intenta simplemente abrir la carpeta contenedora.
+    """
+    if not ruta_absoluta:
+        return False
+    try:
+        if os.name == "nt":
+            subprocess.run(["explorer", "/select,", os.path.normpath(ruta_absoluta)])
+            return True
+        else:
+            os.startfile(os.path.dirname(ruta_absoluta))
+            return True
+    except Exception:
+        try:
+            return abrir_carpeta_en_explorador(os.path.dirname(ruta_absoluta))
+        except Exception:
+            return False

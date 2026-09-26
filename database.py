@@ -278,6 +278,45 @@ def save_inmobiliaria(datos):
 
 
 # ---------------------------------------------------------------------------
+# Editor de datos genérico (para la pantalla "Editor de datos (CSV)")
+#
+# A propósito NO incluye "numeracion.csv": ese archivo se administra solo
+# desde get_next_numero() y no debe editarse a mano desde la interfaz.
+# ---------------------------------------------------------------------------
+
+def _tablas_editables():
+    return {
+        "edificios": (config.EDIFICIOS_CSV, EDIFICIOS_CAMPOS, "Edificios"),
+        "unidades": (config.UNIDADES_CSV, UNIDADES_CAMPOS, "Unidades"),
+        "inmobiliaria": (config.INMOBILIARIA_CSV, INMOBILIARIA_CAMPOS, "Inmobiliaria"),
+        "historial": (config.HISTORIAL_CSV, HISTORIAL_CAMPOS, "Historial de recibos"),
+    }
+
+
+def listar_tablas_editables():
+    """Devuelve [(clave_interna, etiqueta_visible), ...] en un orden fijo."""
+    orden = ["edificios", "unidades", "inmobiliaria", "historial"]
+    tablas = _tablas_editables()
+    return [(clave, tablas[clave][2]) for clave in orden]
+
+
+def get_campos_tabla(clave):
+    return list(_tablas_editables()[clave][1])
+
+
+def leer_tabla(clave):
+    """Devuelve (campos, filas) de la tabla indicada, leída desde el CSV."""
+    ruta, campos, _etiqueta = _tablas_editables()[clave]
+    return list(campos), _read_csv(ruta)
+
+
+def guardar_tabla(clave, filas):
+    """Sobrescribe por completo el CSV de la tabla indicada con 'filas'."""
+    ruta, campos, _etiqueta = _tablas_editables()[clave]
+    _write_csv(ruta, campos, filas)
+
+
+# ---------------------------------------------------------------------------
 # Copia de seguridad
 # ---------------------------------------------------------------------------
 

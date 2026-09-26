@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# PyInstaller (se regenera con construir_exe.bat)
+build/
+dist/
+*.spec
+
+# Datos del usuario (privados, se recrean solos al iniciar la app)
+**/datos/*
+**/configuracion/*
+**/edificios/*
+backups/
+!**/.gitkeep
+
+# IDE / sistema
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

@@ -1,2 +1,0 @@
-xhtml2pdf==0.2.16
-pyinstaller==6.10.0

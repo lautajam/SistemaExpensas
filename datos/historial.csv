@@ -1,8 +1,0 @@
-﻿numero_recibo,edificio,fecha,expensas_de,gastos_de,piso,tipo,unidad,inquilino,importe,archivo
-00001,Edificio Mitre 456,12/09/2026,SEPTIEMBRE 2026,AGOSTO 2026,1°,DEPTO,A,Diego Álvarez,40000.00,edificios\Edificio_Mitre_456\recibo_expensas_Edificio_Mitre_456_1°_A_SEPTIEMBRE.pdf
-00002,Edificio Mitre 456,12/09/2026,SEPTIEMBRE 2026,AGOSTO 2026,BAU,BAU,14,Marcos Sosa,8000.00,edificios\Edificio_Mitre_456\recibo_expensas_Edificio_Mitre_456_BAU_14_SEPTIEMBRE.pdf
-00003,Edificio Mitre 456,12/09/2026,SEPTIEMBRE 2026,AGOSTO 2026,1°,DEPTO,B,Silvia Ruiz,40000.00,edificios\Edificio_Mitre_456\recibo_expensas_Edificio_Mitre_456_1°_B_SEPTIEMBRE.pdf
-00004,Edificio Mitre 456,12/09/2026,SEPTIEMBRE 2026,AGOSTO 2026,PB,DEPTO,1,Laura Fernández,10000.00,edificios\Edificio_Mitre_456\recibo_expensas_Edificio_Mitre_456_PB_1_SEPTIEMBRE.pdf
-00001,Edificio Alsina 123,12/09/2026,SEPTIEMBRE 2026,AGOSTO 2026,1°,DEPTO,A,Carlos López,123456789.00,edificios\Edificio_Alsina_123\recibo_expensas_Edificio_Alsina_123_1°_A_SEPTIEMBRE.pdf
-00002,Edificio Alsina 123,12/09/2026,SEPTIEMBRE 2026,AGOSTO 2026,1°,DEPTO,B,María García,45000.00,edificios\Edificio_Alsina_123\recibo_expensas_Edificio_Alsina_123_1°_B_SEPTIEMBRE.pdf
-00003,Edificio Alsina 123,12/09/2026,SEPTIEMBRE 2026,AGOSTO 2026,PB,DEPTO,1,Ana Pérez,123456.00,edificios\Edificio_Alsina_123\recibo_expensas_Edificio_Alsina_123_PB_1_SEPTIEMBRE.pdf
