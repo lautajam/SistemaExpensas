@@ -48,7 +48,8 @@ COL_ETIQUETA, COL_TOTAL, COL_DEUDA, COL_PAGADO, COL_ESTADO, COL_ID = 2, 3, 4, 5,
 # None significa "usar el mes anterior".
 TEXTO_POR_ESTADO = {
     "total": None,
-    "parcial": "PARCIAL",
+    "a cta": "A CTA.",
+    "parcial": "A CTA.",          # el Excel de una versión anterior decía "Parcial"
     "deuda": "DEUDA",
     "no pagado": "NO PAGADO",
 }
@@ -118,7 +119,7 @@ def _borde(izq="thin", der="thin", arr="thin", aba="thin"):
 
 
 def _formula_estado(r):
-    return f'=IF(E{r}=0,"No pagado",IF(E{r}=D{r},"Deuda",IF(E{r}>=C{r}+D{r},"Total","Parcial")))'
+    return f'=IF(E{r}=0,"No pagado",IF(E{r}=D{r},"Deuda",IF(E{r}>=C{r}+D{r},"Total","A cta.")))'
 
 
 def _sin_espacios(texto):
@@ -282,7 +283,7 @@ def _calcular_estado(total, deuda, pagado):
         return "Deuda"
     if pagado >= total + deuda:
         return "Total"
-    return "Parcial"
+    return "A cta."
 
 
 def planilla_abierta(nombre_edificio):
@@ -378,7 +379,7 @@ def estado_agregado(estados):
     """
     Estado de un grupo que paga todo junto (depto + cochera/baulera): "Total" solo si
     TODAS las filas dicen Total, "No pagado" si todas dicen No pagado, "Deuda" si todas
-    dicen Deuda; cualquier otra combinación es "Parcial". None si no hay ninguna fila.
+    dicen Deuda; cualquier otra combinación es "A cta.". None si no hay ninguna fila.
     """
     normalizados = [_norm(e) for e in estados if e]
     if not normalizados:
@@ -386,4 +387,4 @@ def estado_agregado(estados):
     for clave, texto in (("total", "Total"), ("no pagado", "No pagado"), ("deuda", "Deuda")):
         if all(e == clave for e in normalizados):
             return texto
-    return "Parcial"
+    return "A cta."

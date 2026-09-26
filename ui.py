@@ -1740,8 +1740,8 @@ class App(tk.Tk):
 
     @staticmethod
     def _tag_estado(estado):
-        return {"total": "total", "parcial": "parcial", "deuda": "deuda", "no pagado": "nopagado"}.get(
-            (estado or "").strip().lower(), "")
+        return {"total": "total", "a cta": "parcial", "parcial": "parcial", "deuda": "deuda", "no pagado": "nopagado"}.get(
+            pagos._norm(estado), "")
 
     def _cargar_unidades(self, mantener_seleccion=False):
         previas = set(self.seleccionadas) if mantener_seleccion else set()

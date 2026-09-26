@@ -35,7 +35,7 @@ editables.
 - Una planilla de pagos en Excel por edificio, generada y mantenida por la
   aplicación, o bien una planilla propia con orden fijo leída por celdas.
 - Campo «Gastos de» del recibo calculado automáticamente según el estado de
-  pago (Total, Parcial, Deuda o No pagado).
+  pago (Total, A cta., Deuda o No pagado).
 - Períodos «Expensas de» y «Gastos de» completados solos según el mes
   corriente.
 - Generación de recibos en PDF por lote, con numeración correlativa por
@@ -191,7 +191,7 @@ tildes y «ñ». Si un archivo falta o está vacío, se recrea con sus encabezad
 | RELACIÓN | Departamento al que pertenece una cochera o baulera (`de 1° A`), o sus asociadas incluidas en el recibo (`con Cochera 6`). |
 | DUEÑO, INQUILINO | Datos de la unidad. |
 | IMPORTE | Monto del recibo. |
-| PAGO | Estado según la planilla: Total, Parcial, Deuda, No pagado o Sin celda. |
+| PAGO | Estado según la planilla: Total, A cta., Deuda, No pagado o Sin celda. |
 
 ## 8. Planilla de pagos
 
@@ -209,7 +209,7 @@ Cada mes se completan únicamente las columnas *Total a pagar*, *Monto deuda*
 y *Monto pagado*. *Tipo pago* es una fórmula:
 
 ```
-=SI(E4=0;"No pagado";SI(E4=D4;"Deuda";SI(E4>=C4+D4;"Total";"Parcial")))
+=SI(E4=0;"No pagado";SI(E4=D4;"Deuda";SI(E4>=C4+D4;"Total";"A cta.")))
 ```
 
 *Total* requiere que *Monto pagado* sea **mayor o igual** a *Total a pagar* +
@@ -238,7 +238,7 @@ El campo «Gastos de» del recibo surge de «Tipo pago»:
 | Tipo pago | «Gastos de» en el recibo |
 |---|---|
 | Total | Mes anterior (ej. `AGOSTO 2026`) |
-| Parcial | `PARCIAL` |
+| A cta. | `A CTA.` |
 | Deuda | `DEUDA` |
 | No pagado | `NO PAGADO` |
 
@@ -331,7 +331,7 @@ incluidas):
   total. En el historial figura como `A + Cochera 6 + Baulera 2`.
 - **Estado del grupo:** se evalúan las filas del departamento y de las que
   pagan junto. Es *Total* solo si todas son Total, *No pagado* si todas son
-  No pagado, *Deuda* si todas son Deuda, y *Parcial* en cualquier otra
+  No pagado, *Deuda* si todas son Deuda, y *A cta.* en cualquier otra
   combinación. Ese estado determina el «Gastos de» del recibo.
 
 ### Selección y borrado
@@ -491,7 +491,7 @@ sistema; el resto es texto fijo.
 |---|---|
 | Encabezado izquierdo | «Consorcio de Propietarios sitio en la calle» + **dirección y localidad** del consorcio; «C.U.I.T.:» + **CUIT del consorcio**. Si el edificio **no tiene CUIT**, esa línea se quita y el texto del consorcio se agranda y queda centrado verticalmente |
 | Encabezado derecho | **Logo** de la inmobiliaria, su **nombre** y su **subtítulo**, centrados verticalmente |
-| EXPENSAS / GASTO DE | Mes de las expensas y mes de los gastos, abreviados (`SEPT. 26`, `AGO. 26`); «Gasto de» muestra `PARCIAL`, `DEUDA` o `NO PAGADO` según el estado de pago |
+| EXPENSAS / GASTO DE | Mes de las expensas y mes de los gastos, abreviados (`SEPT. 26`, `AGO. 26`); «Gasto de» muestra `A CTA.`, `DEUDA` o `NO PAGADO` según el estado de pago |
 | RECIBO DE EXPENSAS N° / FECHA | **Número** de recibo (mínimo 3 dígitos, `001`) y **fecha de emisión** (`24/09/26`) |
 | Tabla «Depto-Coch-Local» | La unidad y, si van en el mismo recibo, sus cocheras y bauleras separadas por `\|`: `1ero A`, `1ero A \| Coch. 67`, `1ero A \| Baul 12`, `1ero A \| Coch. 67 \| Baul 12`, `Coch. 67`, `Baul 12`… Solo aparecen las que existen |
 | Tabla «Unidad Funcional» | La **UF** de la unidad (la del departamento; las cocheras y bauleras que van con él no se muestran) |
@@ -512,7 +512,7 @@ caracteres como `&` o `<` no rompen el PDF.
 | Estado de pago | Frase |
 |---|---|
 | Total (o sin estado) | El pago total de las expensas indicadas para el mes correspondiente: |
-| Parcial | El pago parcial de las expensas indicadas para el mes correspondiente: |
+| A cta. | El pago a cuenta de las expensas indicadas para el mes correspondiente: |
 | Deuda | El pago de la deuda de expensas de meses anteriores: |
 | No pagado | Expensas indicadas para el mes correspondiente, pendientes de pago: |
 

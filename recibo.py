@@ -9,7 +9,7 @@ la tipografía que se usa para medir textos.
 Qué va en cada lugar del recibo (lo que varía en cada recibo sale de un marcador; el resto es texto fijo):
 
     Encabezado izquierdo   Consorcio de Propietarios sitio en la calle {EDIFICIO_UBICACION}
-                           C.U.I.T.: {EDIFICIO_CUIT}  (si el edificio no tiene CUIT, esa línea se
+                           C.U.I.T.: {EDIFICIO_CUIT}.-  (si el edificio no tiene CUIT, esa línea se
                            quita y el texto del consorcio se agranda y queda centrado)
     Encabezado derecho     {LOGO} / {INMOBILIARIA_NOMBRE} / {INMOBILIARIA_SUBTITULO}
     Títulos                EXPENSAS: {EXPENSAS_DE}      RECIBO DE EXPENSAS N° {NUMERO_RECIBO}
@@ -39,7 +39,7 @@ MESES_ABREVIADOS = ["ENE.", "FEB.", "MAR.", "ABR.", "MAY.", "JUN.", "JUL.", "AGO
 
 
 def abreviar_periodo(texto):
-    """'SEPTIEMBRE 2026' -> 'SEPT. 26'. Lo que no es un mes y año (ej. 'PARCIAL') queda igual."""
+    """'SEPTIEMBRE 2026' -> 'SEPT. 26'. Lo que no es un mes y año (ej. 'A CTA.') queda igual."""
     m = re.fullmatch(r"\s*([A-Za-zÁÉÍÓÚáéíóú]+)\s+(\d{4})\s*", str(texto or ""))
     if m and m.group(1).upper() in config.MESES_ES:
         return f"{MESES_ABREVIADOS[config.MESES_ES.index(m.group(1).upper())]} {m.group(2)[2:]}"
@@ -158,7 +158,8 @@ def texto_uf(u, agrupadas=()):
 # Estado de la planilla (en minúsculas) -> frase que va sobre el importe.
 FRASE_PAGO_POR_ESTADO = {
     "total": "El pago total de las expensas indicadas para el mes correspondiente:",
-    "parcial": "El pago parcial de las expensas indicadas para el mes correspondiente:",
+    "a cta": "El pago a cuenta de las expensas indicadas para el mes correspondiente:",
+    "parcial": "El pago a cuenta de las expensas indicadas para el mes correspondiente:",
     "deuda": "El pago de la deuda de expensas de meses anteriores:",
     "no pagado": "Expensas indicadas para el mes correspondiente, pendientes de pago:",
 }
@@ -239,6 +240,7 @@ _ANCHO_IMPORTE, _MAX_IMPORTE = 528, 32.5
 _ANCHO_CONSORCIO = 230          # renglón del texto del consorcio (encabezado izquierdo)
 _ANCHO_INMOBILIARIA = 212       # nombre y subtítulo de la inmobiliaria (encabezado derecho)
 _PRIMERA_LINEA_CONSORCIO = "Consorcio de Propietarios sitio"
+_ANCHO_TITULO, _MAX_TITULO = 236, 22.3         # "EXPENSAS: ..." y "GASTO DE: ..." (columna izquierda de los títulos)
 
 
 def armar_datos(*, numero, fecha, edificio, datos_edificio, unidad, agrupadas, expensas_de, gastos_de, estado,
@@ -247,8 +249,8 @@ def armar_datos(*, numero, fecha, edificio, datos_edificio, unidad, agrupadas, e
     Devuelve el diccionario de marcadores del recibo.
     numero: N° de recibo; fecha: date; edificio: nombre; datos_edificio: fila de edificios.csv;
     unidad / agrupadas: la unidad del recibo y las cocheras/bauleras que van en el mismo;
-    expensas_de / gastos_de: períodos tal como los devuelve obtener_periodos() (o PARCIAL, DEUDA...);
-    estado: estado de pago de la planilla (Total, Parcial, Deuda, No pagado o None);
+    expensas_de / gastos_de: períodos tal como los devuelve obtener_periodos() (o A CTA., DEUDA...);
+    estado: estado de pago de la planilla (Total, A cta., Deuda, No pagado o None);
     importe: total del recibo (suma del grupo); inmobiliaria: fila de inmobiliaria.csv.
     """
     unidades_txt = texto_unidades(unidad, agrupadas)
@@ -260,9 +262,9 @@ def armar_datos(*, numero, fecha, edificio, datos_edificio, unidad, agrupadas, e
     ubicacion = ", ".join(p for p in (datos_edificio.get("direccion", ""), datos_edificio.get("localidad", "")) if p)
     cuit = (datos_edificio.get("cuit") or "").strip()
     # Con CUIT: texto del consorcio + línea del CUIT. Sin CUIT: sin esa línea y el texto más grande.
-    tam_consorcio = ajustar_bloque(_PRIMERA_LINEA_CONSORCIO, f"en la calle {ubicacion}.", _ANCHO_CONSORCIO,
+    tam_consorcio = ajustar_bloque(_PRIMERA_LINEA_CONSORCIO, f"en la calle {ubicacion}.-", _ANCHO_CONSORCIO,
                                    12.5 if cuit else 17, 3 if cuit else 4)
-    bloque_cuit = (f'<p class="cuit">C.U.I.T.: <span class="dato">{html.escape(cuit)}</span></p>' if cuit else "")
+    bloque_cuit = (f'<p class="cuit">C.U.I.T.: <span class="dato">{html.escape(cuit)}</span>.-</p>' if cuit else "")
     nombre_inmo = (inmobiliaria.get("nombre") or "").strip()
     subtitulo_inmo = (inmobiliaria.get("subtitulo") or "").strip()
 
@@ -271,6 +273,8 @@ def armar_datos(*, numero, fecha, edificio, datos_edificio, unidad, agrupadas, e
         "FECHA_EMISION": fecha_corta(fecha),
         "EXPENSAS_DE": abreviar_periodo(expensas_de),
         "GASTOS_DE": abreviar_periodo(gastos_de),
+        "TAM_EXPENSAS": ajustar_fuente(f"EXPENSAS: {abreviar_periodo(expensas_de)}", _ANCHO_TITULO, _MAX_TITULO),
+        "TAM_GASTOS": ajustar_fuente(f"GASTO DE: {abreviar_periodo(gastos_de)}", _ANCHO_TITULO, _MAX_TITULO),
         "EDIFICIO_NOMBRE": edificio,
         "EDIFICIO_DIRECCION": datos_edificio.get("direccion", ""),
         "EDIFICIO_LOCALIDAD": datos_edificio.get("localidad", ""),
