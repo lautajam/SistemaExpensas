@@ -14,7 +14,9 @@ SistemaExpensas/
 ├── config.py                → rutas (relativas al .exe)
 ├── database.py               → toda la persistencia (CSV)
 ├── utils.py                  → sanitización, importes, fechas
-├── pdf_generator.py           → arma el PDF a partir de la plantilla
+├── unidades.py               → tipos de unidad (depto/local/cochera/baulera), etiquetas y orden
+├── pagos.py                  → planillas de pagos (un Excel por edificio)
+├── pdf_generator.py           → arma el PDF a partir de la plantilla del tipo de unidad
 ├── ui.py                       → toda la interfaz gráfica
 ├── requirements.txt
 ├── construir_exe.bat
@@ -29,8 +31,11 @@ SistemaExpensas/
 │   └── inmobiliaria.csv
 │
 ├── plantilla/                ← EDITABLE, define el diseño del recibo
-│   ├── recibo.html
-│   └── estilo.css
+│   ├── recibo_depto.html
+│   ├── recibo_local.html
+│   ├── recibo_cochera.html
+│   ├── recibo_baulera.html
+│   └── estilo.css            (compartido por las cuatro)
 │
 └── edificios/                ← se crea una subcarpeta por edificio
     ├── Edificio_Alsina_123/
@@ -77,7 +82,10 @@ con unidades de prueba ya cargadas, listas para generar recibos.
    dist/
    ├── SistemaExpensas.exe
    └── plantilla/
-       ├── recibo.html
+       ├── recibo_depto.html
+       ├── recibo_local.html
+       ├── recibo_cochera.html
+       ├── recibo_baulera.html
        └── estilo.css
    ```
 
@@ -143,15 +151,20 @@ BOM para que Excel muestre bien tildes y "ñ").
 3. Tildá las unidades que van a recibir recibo haciendo clic en la
    primera columna (☐ / ☑). También podés usar
    **"Seleccionar todas"** / **"Quitar todas"**.
-4. Para poner el mismo importe a todas las seleccionadas: escribilo en
-   **"Importe para selección"** y apretá **"Aplicar importe a
-   seleccionadas"**.
-5. Para un importe distinto en una sola unidad: **doble clic** sobre esa
-   fila (fuera de la columna de tilde) y editalo en el diálogo que se abre.
-   Esto no afecta a las demás unidades.
-6. Apretá **"GENERAR RECIBOS PDF"**. Se pide confirmación y luego se
+4. Los importes salen de la planilla de pagos: apretá **"Actualizar montos
+   desde planilla"** (ver más abajo). Para un importe puntual distinto en
+   una sola unidad: **doble clic** sobre esa fila (fuera de la columna de
+   tilde) y editalo en el diálogo que se abre. Esto no afecta a las demás
+   unidades.
+5. Apretá **"GENERAR RECIBOS PDF"**. Se pide confirmación y luego se
    genera un PDF por cada unidad seleccionada, dentro de
    `edificios/<Edificio>/`.
+6. Al terminar aparece un mensaje con el resultado. Si tildás **"Mostrar
+   lista de PDF al terminar"** (casilla junto al botón de generar), en su
+   lugar se abre una pantalla con los PDF recién generados, para abrirlos
+   con **"Abrir PDF"** (o doble clic) o verlos en su carpeta con
+   **"Mostrar en carpeta"**. La opción queda guardada para la próxima vez
+   (`configuracion/preferencias.csv`) y viene desactivada de fábrica.
 
 ### Planilla de pagos de cada edificio (`datos/pagos_edificios/`)
 Cada edificio tiene su propio Excel, `<Nombre_Edificio>_pagos.xlsx`, que
@@ -163,8 +176,19 @@ unidad nueva (o editada) se agrega/actualiza en orden (PB, 1° A, 1° B,
 Cada mes, quien administra solo completa las columnas *Total a pagar,
 Monto deuda* y *Monto pagado*; *Tipo pago* es una fórmula que se calcula
 sola. No hace falta tocar nada más (no agregar ni borrar filas a mano: las
-filas las gestiona la app). Cerrá el Excel antes de generar recibos o de
-agregar unidades, para que la app pueda actualizarlo.
+filas las gestiona la app). Para que dé **"Total"**, *Monto pagado* debe
+ser igual a *Total a pagar* + *Monto deuda*.
+
+**IMPORTANTE: guardá el Excel (Ctrl+G) antes de volver a la app.** La app
+lee lo que está guardado en el archivo, no lo que está escrito en pantalla
+sin guardar. Si la planilla sigue abierta, la app te avisa antes de generar
+recibos o de actualizar montos. Cerrala también antes de agregar o borrar
+unidades, para que la app pueda actualizarla.
+
+**Botón "Actualizar montos desde planilla"** (pantalla principal): toma el
+*Monto pagado* de cada unidad como su **importe** (el del recibo) y
+refresca la columna **PAGO**. Al generar recibos, el cuadro de confirmación
+marca con ⚠ las unidades cuyo importe difiere del de la planilla.
 
 Al generar los recibos, el campo **"Gastos de"** de cada unidad sale de
 "Tipo pago":
@@ -186,6 +210,44 @@ solo edificio (por su nombre), y cada fila guarda el id interno de su
 unidad en una columna oculta (H). Así el vínculo es exacto: no depende de
 cómo esté escrito el piso o la letra, y sobrevive a cambios de nombre y a
 reordenar filas.
+
+### Datos de cada unidad
+Piso, **letra o número** (el identificador del depto en ese piso, ej. `A`
+o `2`), **UF** (unidad funcional), **dueño**, inquilino e importe. El dueño
+y la UF se cargan a mano en cada unidad (una cochera no hereda el dueño de
+su depto). En la pantalla principal se ven todas las columnas, más **PAGO**
+(Total / Parcial / Deuda / No pagado, según la planilla de pagos).
+
+**Borrar una unidad:** doble clic sobre la unidad y botón **"Borrar
+unidad"** (o desde Administrar → Administrar edificios/unidades). Si es un
+depto, se borran también sus cocheras y bauleras: antes te muestra la
+lista y pide confirmación. Se quitan de la planilla de pagos del edificio;
+los recibos ya generados y el historial no se borran.
+
+### Tipos de unidad
+Hay 4 tipos: **Depto, Local, Cochera y Baulera**. Cada uno genera su
+recibo con su propia plantilla (ver sección 9).
+
+- Una **cochera o baulera puede pertenecer a un depto** (o ser
+  independiente). Un depto puede tener varias, una o ninguna de cada una.
+- Al **crear un depto** (botón **"+ Nueva unidad"**, tipo Depto) podés
+  sumarle en el mismo paso sus cocheras y bauleras con **"+ Cochera"** /
+  **"+ Baulera"**. También podés hacerlo después, editando el depto.
+- Al crear una **cochera o baulera** aparece el selector **"Pertenece al
+  depto"** con los deptos del edificio. Si elegís uno, toma su inquilino
+  (se puede cambiar) y tiene su **propio importe**.
+- Si cambiás el inquilino de un depto, sus cocheras y bauleras que tenían
+  ese mismo inquilino se actualizan solas.
+- En la pantalla principal cada cochera/baulera aparece justo debajo de su
+  depto (con "↳") y la columna **DEPTO** dice a cuál pertenece. Al tildar
+  un depto se tildan solas sus cocheras y bauleras; después podés destildar
+  cualquiera por separado. Se genera **un recibo por cada unidad tildada**.
+- Un depto que tiene cocheras o bauleras no puede cambiarse a otro tipo
+  hasta que se pasen a otro depto.
+- En la planilla de pagos cada unidad tiene su fila (ej. `1° A`,
+  `Cochera 3 (1° A)`), con las cocheras y bauleras debajo de su depto.
+- En `unidades.csv` el vínculo se guarda en la columna `depto_id` (el `id`
+  del depto).
 
 ### Administrar edificios y unidades
 Menú **Administrar → Administrar edificios/unidades**: permite crear
@@ -265,6 +327,14 @@ recibo_expensas_Edificio_Alsina_123_1_A_SEPTIEMBRE.pdf              (ya existía
 recibo_expensas_Edificio_Alsina_123_1_A_SEPTIEMBRE_00039.pdf        (nuevo)
 ```
 
+Los deptos usan ese formato. Para local, cochera y baulera se agrega el
+tipo y, si pertenecen a un depto, cuál es:
+
+```
+recibo_expensas_Edificio_Alsina_123_Local_PB_1_SEPTIEMBRE.pdf
+recibo_expensas_Edificio_Alsina_123_Cochera_3_Depto_1°_A_SEPTIEMBRE.pdf
+```
+
 Los nombres se sanitizan automáticamente quitando caracteres inválidos
 en Windows (`\ / : * ? " < > |`) y reemplazando espacios por guiones
 bajos. Las tildes y la "ñ" se conservan porque son válidas en NTFS.
@@ -273,17 +343,24 @@ bajos. Las tildes y la "ñ" se conservan porque son válidas en NTFS.
 
 ## 9. Cómo modificar el diseño del PDF más adelante
 
-El recibo se genera a partir de dos archivos de texto plano, sin tocar
-código Python:
+El recibo se genera a partir de archivos de texto plano, sin tocar
+código Python. Hay una plantilla por tipo de unidad (hoy son iguales) y un
+estilo compartido:
 
 ```
-plantilla/recibo.html   → estructura y textos del recibo
-plantilla/estilo.css    → colores, tipografías, tamaños, layout
+plantilla/recibo_depto.html     → recibos de deptos
+plantilla/recibo_local.html     → recibos de locales
+plantilla/recibo_cochera.html   → recibos de cocheras
+plantilla/recibo_baulera.html   → recibos de bauleras
+plantilla/estilo.css            → colores, tipografías, tamaños, layout
 ```
 
-Dentro de `recibo.html` vas a ver marcadores como `{{IMPORTE}}` o
+Dentro de cada `recibo_*.html` vas a ver marcadores como `{{IMPORTE}}` o
 `{{INQUILINO}}`: el programa los reemplaza automáticamente por el dato
-real de cada recibo al generarlo. Podés:
+real de cada recibo al generarlo. Además de los datos de siempre, están
+disponibles `{{TIPO}}` (DEPTO, LOCAL, COCHERA o BAULERA), `{{DEPTO}}` (el
+depto al que pertenece una cochera/baulera, ej. `1° A`; vacío si no
+tiene), `{{UF}}` (unidad funcional) y `{{DUENO}}`. Podés:
 
 - Cambiar textos fijos (por ejemplo "ADMINISTRACIÓN DE CONSORCIOS").
 - Reordenar secciones, agregar un logo (`<img src="logo.png">`,
@@ -306,9 +383,10 @@ volvé a generar un recibo de prueba — no hace falta recompilar el .exe.
 - CSV vacíos o inexistentes: se recrean automáticamente con sus
   encabezados correctos.
 - Nombres de edificios/inquilinos con espacios y tildes: soportado.
-- Unidades "atípicas" (`PB COC 3`, `BAU 14`, etc.): se guardan con
-  columnas separadas `piso`, `tipo`, `unidad`, sin asumir el formato
-  "piso + letra".
+- Unidades de cualquier formato (`PB 1`, cochera `21`, baulera `14`...):
+  se guardan con columnas separadas `piso`, `tipo`, `unidad`, sin asumir
+  el formato "piso + letra". El piso es opcional para local, cochera y
+  baulera.
 - Ningún error de Python se muestra como traceback: siempre aparece un
   cuadro de diálogo con un mensaje entendible.
 - Antes de generar recibos se pide confirmación explícita.
@@ -326,10 +404,9 @@ volvé a generar un recibo de prueba — no hace falta recompilar el .exe.
   editar con seguridad una unidad puntual (por ejemplo, si cambiás el
   piso de "1°" a "2°") sin perder la referencia ni afectar a otras filas
   con datos parecidos.
-- **Eliminación de unidades**: no se implementó en esta primera versión,
-  tal como sugeriste, para no generar inconsistencias con el historial
-  ya generado. Sí se puede editar cualquier campo de una unidad
-  existente.
+- **Eliminación de unidades**: se puede borrar una unidad (y las cocheras
+  y bauleras de un depto). El historial y los PDF ya generados no se
+  tocan, así que siguen mostrando los datos tal como eran al emitirse.
 - **Checkbox de selección**: en vez de una librería adicional para
   checkboxes reales en la tabla, se usa una columna con ☑ / ☐ que se
   alterna al hacer clic — mismo resultado visual, cero dependencias
@@ -339,9 +416,10 @@ volvé a generar un recibo de prueba — no hace falta recompilar el .exe.
 
 ## 12. Datos de ejemplo incluidos
 
-- **Edificio Alsina 123**: PB 1, 1° A, 1° B, 2° A (deptos) y PB COC 3
-  (cochera).
-- **Edificio Mitre 456**: PB 1, 1° A, 1° B (deptos) y BAU 14 (baulera).
+- **Edificio Alsina 123**: PB 1, 1° A, 1° B, 2° A (deptos), un local
+  (PB 1) y la cochera 3, que pertenece al 1° A.
+- **Edificio Mitre 456**: PB 1, 1° A, 1° B (deptos) y la baulera 14, que
+  pertenece al 1° A.
 
 Podés borrarlos o editarlos libremente desde "Administrar
 edificios/unidades" una vez que verifiques que todo funciona.

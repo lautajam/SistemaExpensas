@@ -141,19 +141,26 @@ def primera_palabra(texto):
     return texto.split(" ")[0] if texto else "PERIODO"
 
 
-def nombre_archivo_recibo(edificio, piso, unidad, periodo, numero_recibo, carpeta_destino):
+def nombre_archivo_recibo(edificio, piso, unidad, periodo, numero_recibo, carpeta_destino,
+                          tipo="DEPTO", depto=""):
     """
     Genera el nombre de archivo del recibo y resuelve conflictos de nombre.
+    Los deptos mantienen el formato de siempre; para local/cochera/baulera se
+    agrega el tipo, y para las que pertenecen a un depto, la etiqueta de ese depto.
     Si el archivo "natural" ya existe, se le agrega el número de recibo
     como sufijo para no sobrescribir ni perder el archivo anterior.
     Devuelve la ruta completa del archivo.
     """
-    base = "recibo_expensas_{}_{}_{}_{}".format(
-        sanitize_filename(edificio),
-        sanitize_filename(piso),
-        sanitize_filename(unidad),
-        sanitize_filename(primera_palabra(periodo)),
-    )
+    partes = ["recibo_expensas", sanitize_filename(edificio)]
+    if str(tipo or "").strip().upper() not in ("", "DEPTO"):
+        partes.append(sanitize_filename(str(tipo).capitalize()))
+    for texto in (piso, unidad):
+        if str(texto or "").strip():
+            partes.append(sanitize_filename(texto))
+    if str(depto or "").strip():
+        partes += ["Depto", sanitize_filename(depto)]
+    partes.append(sanitize_filename(primera_palabra(periodo)))
+    base = "_".join(partes)
     nombre = base + ".pdf"
     ruta = os.path.join(carpeta_destino, nombre)
 

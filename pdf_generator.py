@@ -2,17 +2,20 @@
 """
 pdf_generator.py
 ----------------
-Genera los PDF de los recibos a partir de la plantilla editable ubicada en:
+Genera los PDF de los recibos a partir de las plantillas editables ubicadas en:
 
-    plantilla/recibo.html
-    plantilla/estilo.css
+    plantilla/recibo_depto.html
+    plantilla/recibo_local.html
+    plantilla/recibo_cochera.html
+    plantilla/recibo_baulera.html
+    plantilla/estilo.css   (compartido por las cuatro)
 
 El motor de renderizado es xhtml2pdf (paquete "xhtml2pdf", módulo "pisa"),
 elegido por ser 100% Python puro: no necesita instalar wkhtmltopdf ni
 librerías del sistema operativo, y empaqueta sin problemas con PyInstaller.
 
 Para modificar el diseño del recibo, basta con editar esos dos archivos
-(recibo.html / estilo.css) con cualquier editor de texto: NO hace falta
+(recibo_*.html / estilo.css) con cualquier editor de texto: NO hace falta
 tocar este archivo ni recompilar el .exe. Ver el placeholder "{{CLAVE}}"
 dentro del HTML: cada uno se reemplaza por el valor correspondiente del
 diccionario "datos" al generar el PDF.
@@ -23,6 +26,7 @@ import os
 from xhtml2pdf import pisa
 
 import config
+from unidades import normalizar_tipo
 
 
 def _link_callback(uri, rel):
@@ -43,32 +47,36 @@ def _link_callback(uri, rel):
     return uri
 
 
-def _cargar_plantilla_html():
-    if not os.path.exists(config.RECIBO_HTML):
+def _cargar_plantilla_html(tipo):
+    ruta = config.RECIBOS_HTML[normalizar_tipo(tipo)]
+    if not os.path.exists(ruta):
         raise FileNotFoundError(
-            f"No se encontró la plantilla del recibo en:\n{config.RECIBO_HTML}\n\n"
+            f"No se encontró la plantilla del recibo en:\n{ruta}\n\n"
             "Verificá que la carpeta 'plantilla' esté al lado del ejecutable."
         )
-    with open(config.RECIBO_HTML, "r", encoding="utf-8") as f:
+    with open(ruta, "r", encoding="utf-8") as f:
         return f.read()
 
 
-def generar_pdf_recibo(datos, ruta_salida):
+def generar_pdf_recibo(datos, ruta_salida, tipo="DEPTO"):
     """
-    Genera un PDF a partir de la plantilla, reemplazando cada "{{CLAVE}}"
-    del HTML por el valor correspondiente en el diccionario "datos".
+    Genera un PDF a partir de la plantilla del tipo de unidad (recibo_depto,
+    recibo_local, recibo_cochera o recibo_baulera), reemplazando cada
+    "{{CLAVE}}" del HTML por el valor correspondiente en el diccionario "datos".
 
-    datos: dict con, como mínimo, las claves usadas en plantilla/recibo.html:
+    datos: dict con, como mínimo, las claves usadas en las plantillas:
         NUMERO_RECIBO, FECHA_EMISION, EDIFICIO_NOMBRE,
         EXPENSAS_DE, GASTOS_DE, PISO, UNIDAD, TIPO,
         INQUILINO, IMPORTE,
         INMOBILIARIA_NOMBRE, INMOBILIARIA_DIRECCION,
         INMOBILIARIA_TELEFONO, INMOBILIARIA_EMAIL, INMOBILIARIA_CUIT
+    Opcionales: DEPTO (etiqueta del depto al que pertenece una cochera/baulera),
+    UF (unidad funcional) y DUENO.
 
     ruta_salida: ruta completa (incluyendo nombre de archivo .pdf) donde
     se va a guardar el PDF generado.
     """
-    html = _cargar_plantilla_html()
+    html = _cargar_plantilla_html(tipo)
 
     for clave, valor in datos.items():
         html = html.replace("{{" + clave + "}}", "" if valor is None else str(valor))

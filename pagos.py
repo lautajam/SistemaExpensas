@@ -9,7 +9,9 @@ Planillas de pagos: un Excel por edificio en datos/pagos_edificios/, llamado
 Diseño de la hoja:
     fila 2:  nombre del edificio
     fila 3:  Tipo unidad | Total a pagar | Monto deuda | Monto pagado | Tipo pago
-    fila 4+: una fila por unidad, ordenadas por piso y unidad
+    fila 4+: una fila por unidad (deptos, locales, cocheras, bauleras), en
+             orden de piso y unidad, con cada depto seguido de sus cocheras
+             y bauleras
     columna H (oculta): id interno de la unidad. Es lo que vincula cada fila
     con su unidad, aunque cambie el piso/letra o se reordenen las filas.
 
@@ -25,6 +27,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, Side
 
 import config
+from unidades import etiqueta_unidad, indice_por_id, ordenar_con_asociadas
 from utils import parse_importe, sanitize_filename
 
 ENCABEZADOS = ["Tipo unidad", "Total a pagar", "Monto deuda", "Monto pagado", "Tipo pago"]
@@ -47,38 +50,6 @@ TEXTO_POR_ESTADO = {
 
 def ruta_pagos_edificio(nombre_edificio):
     return os.path.join(config.PAGOS_DIR, f"{sanitize_filename(nombre_edificio)}_pagos.xlsx")
-
-
-def etiqueta_unidad(u):
-    """Texto que se ve en la columna 'Tipo unidad', ej.: '1° A', 'PB COCH 3'."""
-    piso = (u.get("piso") or "").strip()
-    tipo = (u.get("tipo") or "").strip()
-    unidad = (u.get("unidad") or "").strip()
-    partes = [piso]
-    if tipo and tipo.upper() not in ("DEPTO", piso.upper(), unidad.upper()):
-        partes.append(tipo)
-    partes.append(unidad)
-    return " ".join(p for p in partes if p)
-
-
-def _natural(texto):
-    return [(0, int(p), "") if p.isdigit() else (1, 0, p.lower())
-            for p in re.findall(r"\d+|\D+", str(texto or "")) if p.strip()]
-
-
-def _clave_piso(piso):
-    p = str(piso or "").replace("°", "").replace("º", "").strip()
-    if p.upper() in ("PB", "P B", "PLANTA BAJA"):
-        return (0, 0, "")
-    m = re.match(r"\d+", p)
-    if m:
-        return (1, int(m.group()), "")
-    return (2, 0, p.lower())
-
-
-def _clave_orden(u):
-    tipo = (u.get("tipo") or "").strip().upper()
-    return (_clave_piso(u.get("piso")), 0 if tipo in ("", "DEPTO") else 1, tipo, _natural(u.get("unidad")))
 
 
 # ---------------------------------------------------------------------------
@@ -122,9 +93,10 @@ def sincronizar_edificio(nombre_edificio, unidades):
     ruta = ruta_pagos_edificio(nombre_edificio)
     os.makedirs(config.PAGOS_DIR, exist_ok=True)
 
-    deseadas = sorted(unidades, key=_clave_orden)
+    por_id = indice_por_id(unidades)
+    deseadas = [u for u, _nivel in ordenar_con_asociadas(unidades)]
     ids = [u["id"] for u in deseadas]
-    etiquetas = [etiqueta_unidad(u) for u in deseadas]
+    etiquetas = [etiqueta_unidad(u, por_id) for u in deseadas]
 
     valores = {}
     if os.path.isfile(ruta):
@@ -199,11 +171,23 @@ def _calcular_estado(total, deuda, pagado):
     return "Parcial"
 
 
-def leer_estados(nombre_edificio):
+def planilla_abierta(nombre_edificio):
     """
-    Devuelve {id_unidad: estado} leyendo el 'Tipo pago' de la planilla del
-    edificio. Si el Excel no guardó el resultado de la fórmula, se calcula
-    con la misma lógica. Lanza FileNotFoundError si la planilla no existe.
+    True si la planilla figura abierta en Excel o LibreOffice (existe su archivo de
+    bloqueo). En ese caso lo que se escribió y no se guardó todavía no se ve desde la app.
+    """
+    ruta = ruta_pagos_edificio(nombre_edificio)
+    carpeta, nombre = os.path.split(ruta)
+    return os.path.exists(os.path.join(carpeta, "~$" + nombre)) or \
+        os.path.exists(os.path.join(carpeta, ".~lock." + nombre + "#"))
+
+
+def leer_planilla(nombre_edificio):
+    """
+    Devuelve {id_unidad: {"total", "deuda", "pagado", "estado"}} con lo que está
+    GUARDADO en la planilla del edificio. Si el Excel no guardó el resultado de la
+    fórmula "Tipo pago", el estado se calcula con la misma lógica. Lanza
+    FileNotFoundError si la planilla no existe.
     """
     ruta = ruta_pagos_edificio(nombre_edificio)
     if not os.path.isfile(ruta):
@@ -212,20 +196,27 @@ def leer_estados(nombre_edificio):
     wb = load_workbook(ruta, data_only=True)
     try:
         ws = wb.worksheets[0]
-        estados = {}
+        datos = {}
         for r in range(FILA_INICIO, ws.max_row + 1):
             uid = ws.cell(r, COL_ID).value
-            if not uid or str(uid) in estados:
+            if not uid or str(uid) in datos:
                 continue
+            total, deuda, pagado = (ws.cell(r, c).value for c in (COL_TOTAL, COL_DEUDA, COL_PAGADO))
             estado = ws.cell(r, COL_ESTADO).value
             if estado in (None, "") or str(estado).startswith(("=", "#")):
-                estado = _calcular_estado(
-                    ws.cell(r, COL_TOTAL).value, ws.cell(r, COL_DEUDA).value, ws.cell(r, COL_PAGADO).value
-                )
-            estados[str(uid)] = str(estado).strip()
-        return estados
+                estado = _calcular_estado(total, deuda, pagado)
+            datos[str(uid)] = {
+                "total": parse_importe(total), "deuda": parse_importe(deuda),
+                "pagado": parse_importe(pagado), "estado": str(estado).strip(),
+            }
+        return datos
     finally:
         wb.close()
+
+
+def leer_estados(nombre_edificio):
+    """Devuelve {id_unidad: estado} (ver leer_planilla)."""
+    return {uid: d["estado"] for uid, d in leer_planilla(nombre_edificio).items()}
 
 
 def _norm(texto):

@@ -20,6 +20,7 @@ from datetime import datetime
 
 import config
 import pagos
+from unidades import DEPTO, TIPOS_ASOCIABLES, normalizar_tipo
 from utils import sanitize_filename
 
 # ---------------------------------------------------------------------------
@@ -31,8 +32,7 @@ _AVISOS = []
 
 def sincronizar_pagos(nombre_edificio):
     """Deja la planilla de pagos del edificio con una fila por unidad, en orden."""
-    unidades = [u for u in _read_csv(config.UNIDADES_CSV) if u["edificio"] == nombre_edificio]
-    return pagos.sincronizar_edificio(nombre_edificio, unidades)
+    return pagos.sincronizar_edificio(nombre_edificio, get_unidades_por_edificio(nombre_edificio))
 
 
 def _sincronizar_pagos_seguro(nombre_edificio):
@@ -95,7 +95,7 @@ def _append_csv(path, fieldnames, row):
 # Inicialización de datos (crea todo lo que falte, con datos de ejemplo)
 # ---------------------------------------------------------------------------
 
-UNIDADES_CAMPOS = ["id", "edificio", "piso", "tipo", "unidad", "inquilino", "importe"]
+UNIDADES_CAMPOS = ["id", "edificio", "piso", "tipo", "unidad", "uf", "inquilino", "dueno", "importe", "depto_id"]
 EDIFICIOS_CAMPOS = ["id", "nombre"]
 NUMERACION_CAMPOS = ["edificio", "ultimo_recibo"]
 HISTORIAL_CAMPOS = [
@@ -123,16 +123,25 @@ def ensure_data_files():
             crear_carpeta_edificio(e["nombre"])
 
     if not os.path.exists(config.UNIDADES_CSV):
+        def _u(edificio, piso, tipo, unidad, inquilino, importe, depto_id=""):
+            return {"id": uuid.uuid4().hex[:8], "edificio": edificio, "piso": piso, "tipo": tipo,
+                    "unidad": unidad, "uf": "", "inquilino": inquilino, "dueno": "",
+                    "importe": importe, "depto_id": depto_id}
+
+        alsina, mitre = "Edificio Alsina 123", "Edificio Mitre 456"
+        a_pb1 = _u(alsina, "PB", "DEPTO", "1", "Ana Pérez", "45000")
+        a_1a = _u(alsina, "1°", "DEPTO", "A", "Carlos López", "45000")
+        m_1a = _u(mitre, "1°", "DEPTO", "A", "Diego Álvarez", "40000")
         unidades_ejemplo = [
-            {"id": uuid.uuid4().hex[:8], "edificio": "Edificio Alsina 123", "piso": "PB", "tipo": "DEPTO", "unidad": "1", "inquilino": "Ana Pérez", "importe": "45000"},
-            {"id": uuid.uuid4().hex[:8], "edificio": "Edificio Alsina 123", "piso": "1°", "tipo": "DEPTO", "unidad": "A", "inquilino": "Carlos López", "importe": "45000"},
-            {"id": uuid.uuid4().hex[:8], "edificio": "Edificio Alsina 123", "piso": "1°", "tipo": "DEPTO", "unidad": "B", "inquilino": "María García", "importe": "45000"},
-            {"id": uuid.uuid4().hex[:8], "edificio": "Edificio Alsina 123", "piso": "2°", "tipo": "DEPTO", "unidad": "A", "inquilino": "Pedro Rodríguez", "importe": "48000"},
-            {"id": uuid.uuid4().hex[:8], "edificio": "Edificio Alsina 123", "piso": "PB", "tipo": "COCH", "unidad": "3", "inquilino": "Juan Gómez", "importe": "12000"},
-            {"id": uuid.uuid4().hex[:8], "edificio": "Edificio Mitre 456", "piso": "PB", "tipo": "DEPTO", "unidad": "1", "inquilino": "Laura Fernández", "importe": "38000"},
-            {"id": uuid.uuid4().hex[:8], "edificio": "Edificio Mitre 456", "piso": "1°", "tipo": "DEPTO", "unidad": "A", "inquilino": "Diego Álvarez", "importe": "40000"},
-            {"id": uuid.uuid4().hex[:8], "edificio": "Edificio Mitre 456", "piso": "1°", "tipo": "DEPTO", "unidad": "B", "inquilino": "Silvia Ruiz", "importe": "40000"},
-            {"id": uuid.uuid4().hex[:8], "edificio": "Edificio Mitre 456", "piso": "BAU", "tipo": "BAU", "unidad": "14", "inquilino": "Marcos Sosa", "importe": "8000"},
+            a_pb1, a_1a,
+            _u(alsina, "1°", "DEPTO", "B", "María García", "45000"),
+            _u(alsina, "2°", "DEPTO", "A", "Pedro Rodríguez", "48000"),
+            _u(alsina, "PB", "LOCAL", "1", "Kiosco Sur SRL", "60000"),
+            _u(alsina, "", "COCHERA", "3", "Carlos López", "12000", a_1a["id"]),
+            _u(mitre, "PB", "DEPTO", "1", "Laura Fernández", "38000"),
+            m_1a,
+            _u(mitre, "1°", "DEPTO", "B", "Silvia Ruiz", "40000"),
+            _u(mitre, "", "BAULERA", "14", "Diego Álvarez", "8000", m_1a["id"]),
         ]
         _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, unidades_ejemplo)
 
@@ -203,58 +212,161 @@ def crear_carpeta_edificio(nombre_edificio):
 # ---------------------------------------------------------------------------
 
 def get_all_unidades():
-    return _read_csv(config.UNIDADES_CSV)
+    filas = _read_csv(config.UNIDADES_CSV)
+    for u in filas:
+        for campo in UNIDADES_CAMPOS:
+            if u.get(campo) is None:
+                u[campo] = ""
+    return filas
 
 
 def get_unidades_por_edificio(nombre_edificio):
     return [u for u in get_all_unidades() if u["edificio"] == nombre_edificio]
 
 
-def add_unidad(edificio, piso, tipo, unidad, inquilino, importe):
+def _depto_valido(todas, edificio, tipo, depto_id):
+    """
+    Devuelve el depto_id a guardar. Solo cochera y baulera pueden pertenecer a un
+    depto (para el resto queda vacío); el depto debe existir en el mismo edificio.
+    """
+    if tipo not in TIPOS_ASOCIABLES or not depto_id:
+        return ""
+    depto = next((x for x in todas if x["id"] == depto_id), None)
+    if depto is None or normalizar_tipo(depto["tipo"]) != DEPTO or depto["edificio"] != edificio:
+        raise ValueError("El depto elegido no existe en este edificio.")
+    return depto_id
+
+
+def _filas_asociadas(depto, asociadas):
+    filas = []
+    for a in asociadas:
+        tipo = normalizar_tipo(a.get("tipo"))
+        if tipo not in TIPOS_ASOCIABLES:
+            raise ValueError("A un depto solo se le pueden asociar cocheras y bauleras.")
+        numero = str(a.get("unidad", "")).strip()
+        if not numero:
+            raise ValueError("Falta el número de la cochera o baulera.")
+        filas.append({
+            "id": uuid.uuid4().hex[:8],
+            "edificio": depto["edificio"],
+            "piso": str(a.get("piso", "")).strip(),
+            "tipo": tipo,
+            "unidad": numero,
+            "uf": str(a.get("uf", "")).strip(),
+            "inquilino": str(a.get("inquilino", depto["inquilino"])),
+            "dueno": str(a.get("dueno", "")).strip(),
+            "importe": str(a.get("importe", "0")),
+            "depto_id": depto["id"],
+        })
+    return filas
+
+
+def add_unidad(edificio, piso, tipo, unidad, inquilino, importe, depto_id="", asociadas=(), uf="", dueno=""):
+    """
+    Agrega una unidad. Si es cochera/baulera, 'depto_id' indica a qué depto pertenece
+    (opcional). Si es un depto, 'asociadas' es una lista de dicts
+    {tipo, piso, unidad, uf, dueno, importe} con cocheras/bauleras que se crean junto
+    con él (heredan su inquilino). Devuelve el id de la unidad creada.
+    """
     todas = get_all_unidades()
+    tipo = normalizar_tipo(tipo)
     nueva = {
         "id": uuid.uuid4().hex[:8],
         "edificio": edificio,
         "piso": piso,
         "tipo": tipo,
         "unidad": unidad,
+        "uf": str(uf).strip(),
         "inquilino": inquilino,
+        "dueno": str(dueno).strip(),
         "importe": str(importe),
+        "depto_id": _depto_valido(todas, edificio, tipo, depto_id),
     }
     todas.append(nueva)
+    if asociadas:
+        if tipo != DEPTO:
+            raise ValueError("Solo un depto puede tener cocheras o bauleras asociadas.")
+        todas.extend(_filas_asociadas(nueva, asociadas))
     _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
     _sincronizar_pagos_seguro(edificio)
     return nueva["id"]
 
 
+def add_asociadas(depto_id, asociadas):
+    """Agrega cocheras/bauleras nuevas a un depto ya existente."""
+    todas = get_all_unidades()
+    depto = next((x for x in todas if x["id"] == depto_id), None)
+    if depto is None or normalizar_tipo(depto["tipo"]) != DEPTO:
+        raise ValueError("El depto indicado no existe.")
+    todas.extend(_filas_asociadas(depto, asociadas))
+    _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
+    _sincronizar_pagos_seguro(depto["edificio"])
+
+
 def update_unidad(unidad_id, **campos):
     todas = get_all_unidades()
-    encontrada = False
-    edificios_afectados = set()
-    for u in todas:
-        if u["id"] == unidad_id:
-            edificios_afectados.add(u["edificio"])
-            for k, v in campos.items():
-                if k in u:
-                    u[k] = str(v)
-            edificios_afectados.add(u["edificio"])
-            encontrada = True
-            break
-    if not encontrada:
+    u = next((x for x in todas if x["id"] == unidad_id), None)
+    if u is None:
         raise ValueError("No se encontró la unidad indicada.")
+
+    edificios_afectados = {u["edificio"]}
+    inquilino_anterior = u["inquilino"]
+    for k, v in campos.items():
+        if k in UNIDADES_CAMPOS:
+            u[k] = str(v)
+    edificios_afectados.add(u["edificio"])
+
+    u["tipo"] = normalizar_tipo(u["tipo"])
+    if u["tipo"] != DEPTO and any(x["depto_id"] == unidad_id for x in todas):
+        raise ValueError(
+            "Este depto tiene cocheras o bauleras asociadas: pasalas a otro depto "
+            "antes de cambiarle el tipo."
+        )
+    u["depto_id"] = _depto_valido(todas, u["edificio"], u["tipo"], u["depto_id"])
+
+    # Si cambia el inquilino de un depto, lo heredan sus cocheras/bauleras que tenían el mismo.
+    if u["tipo"] == DEPTO and u["inquilino"] != inquilino_anterior:
+        for x in todas:
+            if x["depto_id"] == unidad_id and x["inquilino"] == inquilino_anterior:
+                x["inquilino"] = u["inquilino"]
+
     _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
     for nombre in edificios_afectados:
         _sincronizar_pagos_seguro(nombre)
 
 
-def update_importe_unidades(unidad_ids, nuevo_importe):
-    """Aplica el mismo importe a un conjunto de unidades (por id), sin tocar el resto."""
-    ids_set = set(unidad_ids)
+def set_importes(importes_por_id):
+    """Fija el importe de cada unidad indicada ({id: importe}), sin tocar el resto."""
     todas = get_all_unidades()
     for u in todas:
-        if u["id"] in ids_set:
-            u["importe"] = str(nuevo_importe)
+        if u["id"] in importes_por_id:
+            u["importe"] = str(importes_por_id[u["id"]])
     _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
+
+
+def unidades_a_borrar(unidad_id):
+    """Devuelve la unidad indicada seguida de sus cocheras/bauleras (si es un depto). [] si no existe."""
+    todas = get_all_unidades()
+    u = next((x for x in todas if x["id"] == unidad_id), None)
+    if u is None:
+        return []
+    return [u] + [x for x in todas if x["depto_id"] == unidad_id]
+
+
+def delete_unidad(unidad_id):
+    """
+    Borra la unidad; si es un depto, también sus cocheras y bauleras. Las quita de
+    la planilla de pagos del edificio. Los recibos ya generados y el historial no
+    se tocan. Devuelve la lista de unidades borradas.
+    """
+    borradas = unidades_a_borrar(unidad_id)
+    if not borradas:
+        raise ValueError("No se encontró la unidad indicada.")
+    ids = {u["id"] for u in borradas}
+    restantes = [u for u in get_all_unidades() if u["id"] not in ids]
+    _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, restantes)
+    _sincronizar_pagos_seguro(borradas[0]["edificio"])
+    return borradas
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +430,26 @@ def get_inmobiliaria():
 def save_inmobiliaria(datos):
     fila = {campo: datos.get(campo, "") for campo in INMOBILIARIA_CAMPOS}
     _write_csv(config.INMOBILIARIA_CSV, INMOBILIARIA_CAMPOS, [fila])
+
+
+# ---------------------------------------------------------------------------
+# Preferencias del usuario (configuracion/preferencias.csv: clave, valor)
+# ---------------------------------------------------------------------------
+
+PREFERENCIAS_CAMPOS = ["clave", "valor"]
+
+
+def get_preferencia(clave, por_defecto=""):
+    for fila in _read_csv(config.PREFERENCIAS_CSV):
+        if fila.get("clave") == clave:
+            return fila.get("valor") or por_defecto
+    return por_defecto
+
+
+def set_preferencia(clave, valor):
+    filas = [f for f in _read_csv(config.PREFERENCIAS_CSV) if f.get("clave") != clave]
+    filas.append({"clave": clave, "valor": str(valor)})
+    _write_csv(config.PREFERENCIAS_CSV, PREFERENCIAS_CAMPOS, filas)
 
 
 # ---------------------------------------------------------------------------

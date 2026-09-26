@@ -43,9 +43,13 @@ PAGOS_DIR = os.path.join(DATOS_DIR, "pagos_edificios")
 
 # Configuración de la inmobiliaria
 INMOBILIARIA_CSV = os.path.join(CONFIG_DIR, "inmobiliaria.csv")
+PREFERENCIAS_CSV = os.path.join(CONFIG_DIR, "preferencias.csv")
 
 # Plantilla del recibo (HTML + CSS editables por el usuario)
-RECIBO_HTML = os.path.join(PLANTILLA_DIR, "recibo.html")
+RECIBOS_HTML = {
+    tipo: os.path.join(PLANTILLA_DIR, f"recibo_{tipo.lower()}.html")
+    for tipo in ("DEPTO", "LOCAL", "COCHERA", "BAULERA")
+}
 RECIBO_CSS = os.path.join(PLANTILLA_DIR, "estilo.css")
 
 # Meses en español (índice 0 = enero)
