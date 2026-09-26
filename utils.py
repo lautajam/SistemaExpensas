@@ -107,19 +107,27 @@ def format_currency_ar(valor):
     return f"{signo}$ {entero_str},{decimales:02d}"
 
 
-def mes_actual_es():
-    hoy = date.today()
+def mes_actual_es(hoy=None):
+    hoy = hoy or date.today()
     return f"{config.MESES_ES[hoy.month - 1]} {hoy.year}"
 
 
-def mes_anterior_es():
-    hoy = date.today()
+def mes_anterior_es(hoy=None):
+    hoy = hoy or date.today()
     mes = hoy.month - 1
     anio = hoy.year
     if mes == 0:
         mes = 12
         anio -= 1
     return f"{config.MESES_ES[mes - 1]} {anio}"
+
+
+def obtener_periodos(hoy=None):
+    """
+    Único punto donde se decide qué períodos lleva el recibo.
+    Devuelve (expensas_de, gastos_de). Hoy: mes corriente y mes anterior.
+    """
+    return mes_actual_es(hoy), mes_anterior_es(hoy)
 
 
 def fecha_hoy_es():

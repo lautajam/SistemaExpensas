@@ -26,8 +26,7 @@ import database
 from utils import (
     parse_importe,
     format_currency_ar,
-    mes_actual_es,
-    mes_anterior_es,
+    obtener_periodos,
     fecha_hoy_es,
     nombre_archivo_recibo,
     abrir_carpeta_en_explorador,
@@ -35,6 +34,7 @@ from utils import (
     revelar_en_explorador,
 )
 from pdf_generator import generar_pdf_recibo
+import pagos
 
 COLOR_FONDO = "#f4f6f8"
 COLOR_PRIMARIO = "#1a3d5c"
@@ -50,6 +50,12 @@ def manejar_error(titulo, error):
     """Muestra un mensaje de error comprensible y registra el detalle en consola."""
     traceback.print_exc()
     messagebox.showerror(titulo, f"Ocurrió un problema:\n\n{error}")
+
+
+def mostrar_avisos():
+    """Muestra los avisos pendientes sobre las planillas de pagos (ej. Excel abierto)."""
+    for aviso in database.tomar_avisos():
+        messagebox.showwarning("Planilla de pagos", aviso)
 
 
 # ===========================================================================
@@ -126,6 +132,7 @@ class DialogoUnidad(tk.Toplevel):
             else:
                 database.add_unidad(self.edificio, piso, tipo, unidad_txt, inquilino, importe)
 
+            mostrar_avisos()
             if self.on_guardar:
                 self.on_guardar()
             self.destroy()
@@ -171,6 +178,7 @@ class DialogoEdificioNuevo(tk.Toplevel):
             return
         try:
             database.add_edificio(nombre)
+            mostrar_avisos()
             if self.on_guardar:
                 self.on_guardar(nombre)
             self.destroy()
@@ -425,6 +433,7 @@ class VentanaEditorDatos(tk.Toplevel):
         except Exception as e:
             manejar_error("No se pudo guardar la tabla", e)
             return
+        mostrar_avisos()
         self._cargar_tabla()
         if self.on_cambios:
             self.on_cambios()
@@ -699,27 +708,15 @@ class App(tk.Tk):
         panel = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=6)
         panel.pack(fill="x")
 
-        tk.Label(panel, text="Expensas de:", font=FUENTE_BOLD, bg=COLOR_FONDO).grid(row=0, column=0, sticky="w")
-        self.var_expensas_de = tk.StringVar(value=mes_actual_es())
-        tk.Entry(panel, textvariable=self.var_expensas_de, width=20, font=FUENTE_NORMAL).grid(
-            row=0, column=1, padx=(6, 24), sticky="w"
-        )
-
-        tk.Label(panel, text="Gastos de:", font=FUENTE_BOLD, bg=COLOR_FONDO).grid(row=0, column=2, sticky="w")
-        self.var_gastos_de = tk.StringVar(value=mes_anterior_es())
-        tk.Entry(panel, textvariable=self.var_gastos_de, width=20, font=FUENTE_NORMAL).grid(
-            row=0, column=3, padx=(6, 24), sticky="w"
-        )
-
         tk.Label(panel, text="Importe para selección:", font=FUENTE_BOLD, bg=COLOR_FONDO).grid(
-            row=1, column=0, sticky="w", pady=(10, 0)
+            row=0, column=0, sticky="w"
         )
         self.var_importe_general = tk.StringVar(value="0")
         tk.Entry(panel, textvariable=self.var_importe_general, width=18, font=FUENTE_NORMAL).grid(
-            row=1, column=1, sticky="w", pady=(10, 0)
+            row=0, column=1, padx=(6, 12), sticky="w"
         )
         tk.Button(panel, text="Aplicar importe a seleccionadas", command=self._aplicar_importe_general).grid(
-            row=1, column=2, columnspan=2, sticky="w", pady=(10, 0)
+            row=0, column=2, sticky="w"
         )
 
     def _crear_tabla(self):
@@ -757,6 +754,7 @@ class App(tk.Tk):
 
         tk.Button(pie, text="Seleccionar todas", command=self._seleccionar_todas).pack(side="left")
         tk.Button(pie, text="Quitar todas", command=self._quitar_todas).pack(side="left", padx=8)
+        tk.Button(pie, text="Abrir planilla de pagos", command=self._abrir_planilla_pagos).pack(side="left", padx=8)
 
         tk.Button(
             pie, text="GENERAR RECIBOS PDF", command=self._generar_recibos,
@@ -770,6 +768,7 @@ class App(tk.Tk):
     def _cargar_edificios(self):
         try:
             database.ensure_data_files()
+            mostrar_avisos()
             nombres = database.get_nombres_edificios()
             self.combo_edificio["values"] = nombres
             if nombres:
@@ -876,6 +875,26 @@ class App(tk.Tk):
             manejar_error("No se pudo aplicar el importe", e)
 
     # -----------------------------------------------------------------
+    # Planilla de pagos
+    # -----------------------------------------------------------------
+
+    def _abrir_planilla_pagos(self):
+        edificio = self.var_edificio.get()
+        if not edificio:
+            messagebox.showwarning("Atención", "Seleccioná un edificio.")
+            return
+        try:
+            database.sincronizar_pagos(edificio)
+        except PermissionError:
+            pass  # ya está abierta: se abre/muestra tal como está
+        except Exception as e:
+            manejar_error("No se pudo preparar la planilla de pagos", e)
+            return
+        ok, mensaje = abrir_pdf(pagos.ruta_pagos_edificio(edificio))
+        if not ok:
+            messagebox.showinfo("Planilla de pagos", mensaje)
+
+    # -----------------------------------------------------------------
     # Generación de recibos
     # -----------------------------------------------------------------
 
@@ -885,27 +904,54 @@ class App(tk.Tk):
             messagebox.showwarning("Atención", "Seleccioná un edificio.")
             return
 
-        seleccionadas = list(self.seleccionadas)
+        seleccionadas = [i for i in self.tree.get_children() if i in self.seleccionadas]
         if not seleccionadas:
             messagebox.showwarning("Atención", "No hay unidades seleccionadas para generar recibos.")
             return
 
-        expensas_de = self.var_expensas_de.get().strip().upper()
-        gastos_de = self.var_gastos_de.get().strip().upper()
-        if not expensas_de or not gastos_de:
-            messagebox.showwarning("Atención", "Completá los campos 'Expensas de' y 'Gastos de'.")
+        expensas_de, mes_anterior = obtener_periodos()
+
+        try:
+            database.sincronizar_pagos(edificio)
+        except PermissionError:
+            pass  # planilla abierta: se lee tal como está guardada
+        except Exception as e:
+            manejar_error("No se pudo preparar la planilla de pagos", e)
             return
+
+        try:
+            estados_pagos = pagos.leer_estados(edificio)
+        except Exception as e:
+            manejar_error("No se pudo leer la planilla de pagos del edificio", e)
+            return
+
+        unidades_actuales = {u["id"]: u for u in database.get_unidades_por_edificio(edificio)}
+        gastos_por_iid = {}
+        detalle = []
+        for iid in seleccionadas:
+            u = unidades_actuales.get(iid)
+            if not u:
+                continue
+            texto, estado = pagos.gastos_de_unidad(estados_pagos, u, mes_anterior)
+            gastos_por_iid[iid] = texto
+            nota = texto if estado else f"{texto}  (no figura en la planilla de pagos)"
+            detalle.append(f"  {pagos.etiqueta_unidad(u)}: {nota}")
+
+        max_lineas = 15
+        resumen = "\n".join(detalle[:max_lineas])
+        if len(detalle) > max_lineas:
+            resumen += f"\n  ... y {len(detalle) - max_lineas} más"
 
         if not messagebox.askyesno(
             "Confirmar generación",
-            f"Se van a generar {len(seleccionadas)} recibo(s) para:\n\n{edificio}\n\n¿Confirmás?",
+            f"Se van a generar {len(seleccionadas)} recibo(s) para:\n\n{edificio}\n\n"
+            f"Expensas de: {expensas_de}\nGastos de (según la planilla de pagos):\n{resumen}\n\n¿Confirmás?",
         ):
             return
 
         try:
             inmobiliaria = database.get_inmobiliaria()
             carpeta_destino = database.crear_carpeta_edificio(edificio)
-            unidades_actuales = {u["id"]: u for u in database.get_unidades_por_edificio(edificio)}
 
             generados = 0
             errores = []
@@ -914,6 +960,7 @@ class App(tk.Tk):
                 u = unidades_actuales.get(iid)
                 if not u:
                     continue
+                gastos_de = gastos_por_iid[iid]
                 try:
                     numero = database.get_next_numero(edificio)
                     numero_fmt = f"{numero:05d}"

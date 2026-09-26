@@ -39,6 +39,7 @@ EDIFICIOS_CSV = os.path.join(DATOS_DIR, "edificios.csv")
 UNIDADES_CSV = os.path.join(DATOS_DIR, "unidades.csv")
 NUMERACION_CSV = os.path.join(DATOS_DIR, "numeracion.csv")
 HISTORIAL_CSV = os.path.join(DATOS_DIR, "historial.csv")
+PAGOS_DIR = os.path.join(DATOS_DIR, "pagos_edificios")
 
 # Configuración de la inmobiliaria
 INMOBILIARIA_CSV = os.path.join(CONFIG_DIR, "inmobiliaria.csv")

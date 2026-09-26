@@ -136,8 +136,10 @@ BOM para que Excel muestre bien tildes y "ñ").
 ## 6. Uso diario
 
 1. **Elegí el edificio** en el combo de arriba. Las unidades aparecen solas.
-2. Revisá/ajustá **"Expensas de"** (mes actual por defecto) y
-   **"Gastos de"** (mes anterior por defecto). Son editables.
+2. Los períodos del recibo se completan solos al generar: **"Expensas
+   de"** = mes corriente y **"Gastos de"** = mes anterior, salvo que
+   la planilla de pagos del edificio indique otra cosa (ver más abajo).
+   La regla de los meses vive en `obtener_periodos()` de `utils.py`.
 3. Tildá las unidades que van a recibir recibo haciendo clic en la
    primera columna (☐ / ☑). También podés usar
    **"Seleccionar todas"** / **"Quitar todas"**.
@@ -150,6 +152,40 @@ BOM para que Excel muestre bien tildes y "ñ").
 6. Apretá **"GENERAR RECIBOS PDF"**. Se pide confirmación y luego se
    genera un PDF por cada unidad seleccionada, dentro de
    `edificios/<Edificio>/`.
+
+### Planilla de pagos de cada edificio (`datos/pagos_edificios/`)
+Cada edificio tiene su propio Excel, `<Nombre_Edificio>_pagos.xlsx`, que
+**la app crea y mantiene sola**: se crea al crear el edificio y cada
+unidad nueva (o editada) se agrega/actualiza en orden (PB, 1° A, 1° B,
+2° A...), sin perder los montos ya cargados. Para abrirla, usá el botón
+**"Abrir planilla de pagos"** de la pantalla principal.
+
+Cada mes, quien administra solo completa las columnas *Total a pagar,
+Monto deuda* y *Monto pagado*; *Tipo pago* es una fórmula que se calcula
+sola. No hace falta tocar nada más (no agregar ni borrar filas a mano: las
+filas las gestiona la app). Cerrá el Excel antes de generar recibos o de
+agregar unidades, para que la app pueda actualizarlo.
+
+Al generar los recibos, el campo **"Gastos de"** de cada unidad sale de
+"Tipo pago":
+
+| Tipo pago | "Gastos de" en el recibo |
+|---|---|
+| Total | el mes anterior (ej. AGOSTO 2026) |
+| Parcial | PARCIAL |
+| Deuda | DEUDA |
+| No pagado | NO PAGADO |
+
+Una unidad nueva, con los montos todavía sin cargar, figura como "No
+pagado". El cuadro de confirmación muestra qué va a decir cada recibo
+antes de generarlo. Los textos se cambian en `TEXTO_POR_ESTADO` de
+`pagos.py`.
+
+**Cómo se sabe qué fila es de qué unidad:** cada archivo pertenece a un
+solo edificio (por su nombre), y cada fila guarda el id interno de su
+unidad en una columna oculta (H). Así el vínculo es exacto: no depende de
+cómo esté escrito el piso o la letra, y sobrevive a cambios de nombre y a
+reordenar filas.
 
 ### Administrar edificios y unidades
 Menú **Administrar → Administrar edificios/unidades**: permite crear

@@ -19,7 +19,41 @@ import zipfile
 from datetime import datetime
 
 import config
+import pagos
 from utils import sanitize_filename
+
+# ---------------------------------------------------------------------------
+# Planillas de pagos (un Excel por edificio, ver pagos.py)
+# ---------------------------------------------------------------------------
+
+_AVISOS = []
+
+
+def sincronizar_pagos(nombre_edificio):
+    """Deja la planilla de pagos del edificio con una fila por unidad, en orden."""
+    unidades = [u for u in _read_csv(config.UNIDADES_CSV) if u["edificio"] == nombre_edificio]
+    return pagos.sincronizar_edificio(nombre_edificio, unidades)
+
+
+def _sincronizar_pagos_seguro(nombre_edificio):
+    """Igual que sincronizar_pagos, pero un fallo (ej. Excel abierto) no interrumpe: queda como aviso."""
+    try:
+        sincronizar_pagos(nombre_edificio)
+    except PermissionError:
+        _AVISOS.append(
+            f"No se pudo actualizar la planilla de pagos de «{nombre_edificio}» porque está abierta.\n\n"
+            "Cerrá el archivo de Excel: la próxima vez que se guarde algo se actualizará sola."
+        )
+    except Exception as e:
+        _AVISOS.append(f"No se pudo actualizar la planilla de pagos de «{nombre_edificio}»:\n{e}")
+
+
+def tomar_avisos():
+    """Devuelve (y vacía) los avisos pendientes sobre las planillas de pagos."""
+    avisos = list(_AVISOS)
+    _AVISOS.clear()
+    return avisos
+
 
 # ---------------------------------------------------------------------------
 # Helpers genéricos de CSV
@@ -77,6 +111,7 @@ def ensure_data_files():
     _ensure_dir(config.CONFIG_DIR)
     _ensure_dir(config.EDIFICIOS_DIR)
     _ensure_dir(config.PLANTILLA_DIR)
+    _ensure_dir(config.PAGOS_DIR)
 
     if not os.path.exists(config.EDIFICIOS_CSV):
         edificios_ejemplo = [
@@ -119,6 +154,7 @@ def ensure_data_files():
     # Asegura que exista la carpeta de cada edificio ya cargado
     for e in get_edificios():
         crear_carpeta_edificio(e["nombre"])
+        _sincronizar_pagos_seguro(e["nombre"])
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +184,7 @@ def add_edificio(nombre):
     edificios.append({"id": nuevo_id, "nombre": nombre})
     _write_csv(config.EDIFICIOS_CSV, EDIFICIOS_CAMPOS, edificios)
     crear_carpeta_edificio(nombre)
+    _sincronizar_pagos_seguro(nombre)
     return nuevo_id
 
 
@@ -186,22 +223,28 @@ def add_unidad(edificio, piso, tipo, unidad, inquilino, importe):
     }
     todas.append(nueva)
     _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
+    _sincronizar_pagos_seguro(edificio)
     return nueva["id"]
 
 
 def update_unidad(unidad_id, **campos):
     todas = get_all_unidades()
     encontrada = False
+    edificios_afectados = set()
     for u in todas:
         if u["id"] == unidad_id:
+            edificios_afectados.add(u["edificio"])
             for k, v in campos.items():
                 if k in u:
                     u[k] = str(v)
+            edificios_afectados.add(u["edificio"])
             encontrada = True
             break
     if not encontrada:
         raise ValueError("No se encontró la unidad indicada.")
     _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
+    for nombre in edificios_afectados:
+        _sincronizar_pagos_seguro(nombre)
 
 
 def update_importe_unidades(unidad_ids, nuevo_importe):
@@ -314,6 +357,9 @@ def guardar_tabla(clave, filas):
     """Sobrescribe por completo el CSV de la tabla indicada con 'filas'."""
     ruta, campos, _etiqueta = _tablas_editables()[clave]
     _write_csv(ruta, campos, filas)
+    if clave in ("edificios", "unidades"):
+        for e in get_edificios():
+            _sincronizar_pagos_seguro(e["nombre"])
 
 
 # ---------------------------------------------------------------------------
