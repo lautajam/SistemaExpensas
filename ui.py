@@ -19,7 +19,7 @@ comprensible (messagebox), nunca como un traceback crudo de Python.
 import os
 import traceback
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 
 import config
 import database
@@ -731,10 +731,10 @@ class VentanaConfiguracion(tk.Toplevel):
         self.vars = {}
         etiquetas = [
             ("nombre", "Nombre de la inmobiliaria:"),
+            ("subtitulo", "Subtítulo:"),
             ("direccion", "Dirección:"),
             ("telefono", "Teléfono:"),
             ("email", "Email:"),
-            ("cuit", "CUIT:"),
         ]
         for i, (clave, etiqueta) in enumerate(etiquetas):
             tk.Label(cont, text=etiqueta, font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(
@@ -746,16 +746,85 @@ class VentanaConfiguracion(tk.Toplevel):
             )
             self.vars[clave] = var
 
+        # Logo y firma digital. Los cambios se aplican al apretar "Guardar".
+        self._imagenes = {}   # clave -> ruta elegida (str) o None si se quitó; ausente = sin cambios
+        self._vistas = {}     # clave -> Label con la vista previa
+        self._fotos = {}      # referencias a las imágenes de las vistas previas
+        for j, (clave, titulo) in enumerate((("logo", "Logo:"), ("firma", "Firma digital:")), start=len(etiquetas)):
+            tk.Label(cont, text=titulo, font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(
+                row=j, column=0, sticky="nw", pady=(10, 4))
+            marco = tk.Frame(cont, bg=COLOR_FONDO)
+            marco.grid(row=j, column=1, sticky="w", padx=(10, 0), pady=(10, 4))
+            vista = tk.Label(marco, bg="white", relief="solid", bd=1, width=28, height=4,
+                             font=("Segoe UI", 8), fg="#666666")
+            vista.pack(side="left")
+            self._vistas[clave] = vista
+            barra = tk.Frame(marco, bg=COLOR_FONDO)
+            barra.pack(side="left", padx=(8, 0))
+            tk.Button(barra, text="Elegir imagen...", command=lambda c=clave: self._elegir_imagen(c)).pack(anchor="w")
+            tk.Button(barra, text="Quitar", command=lambda c=clave: self._quitar_imagen(c)).pack(anchor="w", pady=(4, 0))
+            self._mostrar_vista(clave, database.imagen_inmobiliaria(clave))
+
+        tk.Label(cont, text="El logo y la firma se guardan, pero todavía no se usan en los recibos.",
+                 font=("Segoe UI", 8), fg="#666666", bg=COLOR_FONDO).grid(
+            row=len(etiquetas) + 2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
         botones = tk.Frame(cont, bg=COLOR_FONDO)
-        botones.grid(row=len(etiquetas), column=0, columnspan=2, pady=(16, 0))
+        botones.grid(row=len(etiquetas) + 3, column=0, columnspan=2, pady=(16, 0))
         tk.Button(botones, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
                    fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
         tk.Button(botones, text="Cerrar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+
+    def _mostrar_vista(self, clave, ruta):
+        """Muestra una miniatura de la imagen (o 'Sin imagen') en la vista previa."""
+        vista = self._vistas[clave]
+        self._fotos.pop(clave, None)
+        if not ruta:
+            vista.config(image="", text="Sin imagen", width=28, height=4)
+            return
+        try:
+            from PIL import Image, ImageTk
+            with Image.open(ruta) as img:
+                miniatura = img.convert("RGBA")
+            miniatura.thumbnail((200, 70))
+            fondo = Image.new("RGBA", miniatura.size, "white")
+            fondo.alpha_composite(miniatura)
+            self._fotos[clave] = ImageTk.PhotoImage(fondo)
+            vista.config(image=self._fotos[clave], text="", width=miniatura.width, height=miniatura.height)
+        except Exception:
+            vista.config(image="", text=os.path.basename(ruta), width=28, height=4)
+
+    def _elegir_imagen(self, clave):
+        ruta = filedialog.askopenfilename(
+            parent=self, title="Elegir imagen",
+            filetypes=[("Imágenes", "*.png *.jpg *.jpeg *.gif *.bmp"), ("Todos los archivos", "*.*")],
+        )
+        if not ruta:
+            return
+        try:
+            from PIL import Image
+            with Image.open(ruta) as img:
+                img.verify()
+        except Exception:
+            messagebox.showwarning("Imagen no válida", "El archivo elegido no es una imagen válida (usá PNG o JPG).",
+                                   parent=self)
+            return
+        self._imagenes[clave] = ruta
+        self._mostrar_vista(clave, ruta)
+
+    def _quitar_imagen(self, clave):
+        self._imagenes[clave] = None
+        self._mostrar_vista(clave, None)
 
     def _guardar(self):
         try:
             datos = {clave: var.get().strip() for clave, var in self.vars.items()}
             database.save_inmobiliaria(datos)
+            for clave, ruta in self._imagenes.items():
+                if ruta is None:
+                    database.quitar_imagen_inmobiliaria(clave)
+                else:
+                    database.guardar_imagen_inmobiliaria(clave, ruta)
             messagebox.showinfo("Configuración", "Los datos de la inmobiliaria se guardaron correctamente.")
             self.destroy()
         except Exception as e:
@@ -1376,10 +1445,10 @@ class App(tk.Tk):
                         "INQUILINO": u["inquilino"],
                         "IMPORTE": format_currency_ar(importe_valor),
                         "INMOBILIARIA_NOMBRE": inmobiliaria.get("nombre", ""),
+                        "INMOBILIARIA_SUBTITULO": inmobiliaria.get("subtitulo", ""),
                         "INMOBILIARIA_DIRECCION": inmobiliaria.get("direccion", ""),
                         "INMOBILIARIA_TELEFONO": inmobiliaria.get("telefono", ""),
                         "INMOBILIARIA_EMAIL": inmobiliaria.get("email", ""),
-                        "INMOBILIARIA_CUIT": inmobiliaria.get("cuit", ""),
                     }
 
                     generar_pdf_recibo(datos_pdf, ruta_pdf, tipo)

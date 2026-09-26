@@ -45,6 +45,12 @@ PAGOS_DIR = os.path.join(DATOS_DIR, "pagos_edificios")
 INMOBILIARIA_CSV = os.path.join(CONFIG_DIR, "inmobiliaria.csv")
 PREFERENCIAS_CSV = os.path.join(CONFIG_DIR, "preferencias.csv")
 
+# Imágenes de la inmobiliaria (se guardan siempre como PNG en configuracion/)
+IMAGENES_INMOBILIARIA = {
+    "logo": os.path.join(CONFIG_DIR, "logo.png"),
+    "firma": os.path.join(CONFIG_DIR, "firma.png"),
+}
+
 # Plantilla del recibo (HTML + CSS editables por el usuario)
 RECIBOS_HTML = {
     tipo: os.path.join(PLANTILLA_DIR, f"recibo_{tipo.lower()}.html")

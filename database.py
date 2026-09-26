@@ -102,7 +102,7 @@ HISTORIAL_CAMPOS = [
     "numero_recibo", "edificio", "fecha", "expensas_de", "gastos_de",
     "piso", "tipo", "unidad", "inquilino", "importe", "archivo",
 ]
-INMOBILIARIA_CAMPOS = ["nombre", "direccion", "telefono", "email", "cuit"]
+INMOBILIARIA_CAMPOS = ["nombre", "subtitulo", "direccion", "telefono", "email"]
 
 
 def ensure_data_files():
@@ -154,10 +154,10 @@ def ensure_data_files():
     if not os.path.exists(config.INMOBILIARIA_CSV):
         _write_csv(config.INMOBILIARIA_CSV, INMOBILIARIA_CAMPOS, [{
             "nombre": "MI INMOBILIARIA",
+            "subtitulo": "ADMINISTRACIÓN DE CONSORCIOS",
             "direccion": "Av. Ejemplo 1234, CABA",
             "telefono": "011-4444-5555",
             "email": "contacto@miinmobiliaria.com",
-            "cuit": "30-12345678-9",
         }])
 
     # Asegura que exista la carpeta de cada edificio ya cargado
@@ -422,14 +422,57 @@ def get_historial():
 
 def get_inmobiliaria():
     filas = _read_csv(config.INMOBILIARIA_CSV)
-    if filas:
-        return filas[0]
-    return {"nombre": "", "direccion": "", "telefono": "", "email": "", "cuit": ""}
+    fila = filas[0] if filas else {}
+    return {campo: fila.get(campo) or "" for campo in INMOBILIARIA_CAMPOS}
 
 
 def save_inmobiliaria(datos):
     fila = {campo: datos.get(campo, "") for campo in INMOBILIARIA_CAMPOS}
     _write_csv(config.INMOBILIARIA_CSV, INMOBILIARIA_CAMPOS, [fila])
+
+
+# Logo y firma digital de la inmobiliaria: se guardan como configuracion/logo.png y
+# configuracion/firma.png (todavía no se usan en ningún recibo).
+
+MAX_LADO_IMAGEN = 1200
+
+
+def imagen_inmobiliaria(clave):
+    """Ruta de la imagen guardada ('logo' o 'firma'), o None si no hay."""
+    ruta = config.IMAGENES_INMOBILIARIA[clave]
+    return ruta if os.path.isfile(ruta) else None
+
+
+def guardar_imagen_inmobiliaria(clave, ruta_origen):
+    """
+    Lee una imagen (PNG, JPG, GIF, BMP...), la achica si es enorme y la guarda
+    como PNG en configuracion/. Conserva la transparencia si la tiene.
+    Lanza ValueError si el archivo no es una imagen válida.
+    """
+    from PIL import Image, UnidentifiedImageError
+
+    destino = config.IMAGENES_INMOBILIARIA[clave]
+    try:
+        with Image.open(ruta_origen) as original:
+            imagen = original.convert("RGBA")
+    except (UnidentifiedImageError, OSError) as e:
+        raise ValueError("El archivo elegido no es una imagen válida (usá PNG o JPG).") from e
+
+    imagen.thumbnail((MAX_LADO_IMAGEN, MAX_LADO_IMAGEN))
+    if imagen.getchannel("A").getextrema()[0] == 255:
+        imagen = imagen.convert("RGB")  # sin transparencia: archivo más liviano
+
+    _ensure_dir(config.CONFIG_DIR)
+    temporal = destino + ".tmp"
+    imagen.save(temporal, format="PNG")
+    os.replace(temporal, destino)
+    return destino
+
+
+def quitar_imagen_inmobiliaria(clave):
+    ruta = config.IMAGENES_INMOBILIARIA[clave]
+    if os.path.isfile(ruta):
+        os.remove(ruta)
 
 
 # ---------------------------------------------------------------------------

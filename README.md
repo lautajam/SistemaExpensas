@@ -256,7 +256,15 @@ importe, y abrir la carpeta de recibos del edificio.
 
 ### Configuración de la inmobiliaria
 Menú **Administrar → Configuración de la inmobiliaria**: nombre,
-dirección, teléfono, email y CUIT que aparecen en todos los recibos.
+subtítulo (el texto que va debajo del nombre en el recibo), dirección,
+teléfono y email que aparecen en todos los recibos.
+
+También se pueden cargar el **logo** y la **firma digital** con **"Elegir
+imagen..."** (PNG o JPG; se ve una vista previa) y quitarlos con
+**"Quitar"**. Los cambios se aplican al apretar "Guardar". Se guardan como
+`configuracion/logo.png` y `configuracion/firma.png` (entran en el backup)
+y **todavía no se usan en ningún recibo**: se van a colocar en las
+plantillas más adelante. Las imágenes muy grandes se achican a 1200 px.
 
 ### Editor de datos (CSV)
 Menú **Administrar → Editor de datos (CSV)**: pantalla para ver y
@@ -362,7 +370,7 @@ disponibles `{{TIPO}}` (DEPTO, LOCAL, COCHERA o BAULERA), `{{DEPTO}}` (el
 depto al que pertenece una cochera/baulera, ej. `1° A`; vacío si no
 tiene), `{{UF}}` (unidad funcional) y `{{DUENO}}`. Podés:
 
-- Cambiar textos fijos (por ejemplo "ADMINISTRACIÓN DE CONSORCIOS").
+- Cambiar textos fijos (por ejemplo el título "RECIBO N°").
 - Reordenar secciones, agregar un logo (`<img src="logo.png">`,
   guardando `logo.png` dentro de la carpeta `plantilla/`).
 - Cambiar colores, fuentes y espaciados en `estilo.css`.
