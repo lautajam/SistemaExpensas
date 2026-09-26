@@ -1,0 +1,195 @@
+/*
+    estilo.css
+    ----------
+    Estilos del recibo de expensas.
+
+    IMPORTANTE: el PDF se genera con la librería "xhtml2pdf", que soporta
+    un subconjunto de CSS 2.1 (NO soporta flexbox ni grid). Por eso el
+    layout de dos columnas se resuelve con "float", y las tablas se usan
+    para alinear filas de datos. Podés cambiar colores, tipografías y
+    textos sin problema; si agregás layouts nuevos, usá float/table en
+    vez de flex/grid.
+*/
+
+@page {
+    size: A4;
+    margin: 2cm 1.8cm;
+}
+
+body {
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: 11pt;
+    color: #222222;
+}
+
+.hoja {
+    width: 100%;
+}
+
+/* ---------- Encabezado ---------- */
+
+.encabezado {
+    width: 100%;
+}
+
+.encabezado-izq {
+    float: left;
+    width: 60%;
+}
+
+.encabezado-der {
+    float: right;
+    width: 38%;
+    text-align: right;
+}
+
+.nombre-inmobiliaria {
+    font-size: 16pt;
+    font-weight: bold;
+    color: #1a3d5c;
+}
+
+.subtitulo {
+    font-size: 9pt;
+    letter-spacing: 1px;
+    color: #555555;
+    margin-top: 2px;
+}
+
+.numero-recibo {
+    font-size: 13pt;
+    font-weight: bold;
+    color: #1a3d5c;
+}
+
+.fecha-emision {
+    font-size: 9pt;
+    color: #555555;
+    margin-top: 2px;
+}
+
+.linea-separadora {
+    clear: both;
+    border-top: 1.5pt solid #1a3d5c;
+    margin-top: 14px;
+    margin-bottom: 14px;
+}
+
+/* ---------- Datos del edificio y período ---------- */
+
+.datos-edificio {
+    margin-bottom: 10px;
+    font-size: 12pt;
+}
+
+.etiqueta {
+    color: #555555;
+    font-size: 9pt;
+    font-weight: bold;
+}
+
+.valor {
+    font-size: 12pt;
+    margin-left: 6px;
+}
+
+.valor.destacado {
+    font-weight: bold;
+    color: #1a3d5c;
+}
+
+.bloque-periodo {
+    width: 100%;
+    margin-bottom: 16px;
+}
+
+.periodo-item {
+    margin-bottom: 4px;
+}
+
+/* ---------- Tabla de la unidad ---------- */
+
+.tabla-unidad {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 18px;
+}
+
+.tabla-unidad th {
+    background-color: #1a3d5c;
+    color: #ffffff;
+    font-size: 9pt;
+    padding: 6px 8px;
+    text-align: left;
+}
+
+.tabla-unidad td {
+    border: 0.5pt solid #cccccc;
+    padding: 8px;
+    font-size: 11pt;
+}
+
+/* ---------- Destinatario ---------- */
+
+.bloque-destinatario {
+    margin-bottom: 16px;
+    font-size: 11pt;
+    line-height: 1.5;
+}
+
+/* ---------- Importe ---------- */
+
+.bloque-importe {
+    background-color: #f2f6f9;
+    border: 1pt solid #1a3d5c;
+    padding: 14px;
+    text-align: center;
+    margin-bottom: 16px;
+}
+
+.importe-etiqueta {
+    font-size: 10pt;
+    color: #555555;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+.importe-valor {
+    font-size: 20pt;
+    font-weight: bold;
+    color: #1a3d5c;
+}
+
+/* ---------- Datos de la inmobiliaria ---------- */
+
+.datos-inmobiliaria {
+    font-size: 9pt;
+    color: #555555;
+    line-height: 1.5;
+    margin-bottom: 30px;
+}
+
+/* ---------- Pie / firma ---------- */
+
+.pie {
+    margin-top: 40px;
+    text-align: center;
+}
+
+.firma-linea {
+    border-top: 0.5pt solid #888888;
+    width: 60%;
+    margin: 0 auto;
+}
+
+.firma-texto {
+    font-size: 9pt;
+    color: #555555;
+    margin-top: 4px;
+}
+
+.fecha-pie {
+    font-size: 8pt;
+    color: #999999;
+    margin-top: 10px;
+}

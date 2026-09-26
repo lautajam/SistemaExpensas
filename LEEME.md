@@ -1,0 +1,288 @@
+# Sistema de Expensas — Instrucciones
+
+Aplicación de escritorio offline (Windows) para generar recibos de expensas
+de edificios administrados. Guarda todo en archivos CSV editables con Excel
+y genera los recibos en PDF a partir de una plantilla HTML/CSS editable.
+
+---
+
+## 1. Estructura del proyecto
+
+```
+SistemaExpensas/
+├── main.py                 → punto de entrada
+├── config.py                → rutas (relativas al .exe)
+├── database.py               → toda la persistencia (CSV)
+├── utils.py                  → sanitización, importes, fechas
+├── pdf_generator.py           → arma el PDF a partir de la plantilla
+├── ui.py                       → toda la interfaz gráfica
+├── requirements.txt
+├── construir_exe.bat
+│
+├── datos/
+│   ├── edificios.csv
+│   ├── unidades.csv
+│   ├── numeracion.csv
+│   └── historial.csv
+│
+├── configuracion/
+│   └── inmobiliaria.csv
+│
+├── plantilla/                ← EDITABLE, define el diseño del recibo
+│   ├── recibo.html
+│   └── estilo.css
+│
+└── edificios/                ← se crea una subcarpeta por edificio
+    ├── Edificio_Alsina_123/
+    └── Edificio_Mitre_456/
+```
+
+Los archivos `datos/*.csv` y `configuracion/inmobiliaria.csv` **se crean
+solos, con datos de ejemplo, la primera vez que ejecutás el programa** si
+no existen. No hace falta crearlos a mano.
+
+---
+
+## 2. Instalar y probar en modo desarrollo (con Python instalado)
+
+1. Instalá **Python 3.11 o superior** desde https://www.python.org/downloads/
+   (al instalar, tildá "Add Python to PATH").
+2. Abrí una consola (CMD o PowerShell) dentro de la carpeta `SistemaExpensas`.
+3. Instalá las dependencias:
+   ```
+   python -m pip install -r requirements.txt
+   ```
+4. Ejecutá la aplicación:
+   ```
+   python main.py
+   ```
+
+La primera vez vas a ver 2 edificios de ejemplo (Alsina 123 y Mitre 456)
+con unidades de prueba ya cargadas, listas para generar recibos.
+
+---
+
+## 3. Compilar el .exe
+
+1. Con Python y las dependencias ya instaladas (paso anterior), hacé
+   **doble clic en `construir_exe.bat`** (o ejecutalo desde la consola).
+2. El script:
+   - Verifica que Python esté instalado.
+   - Instala/actualiza las dependencias necesarias.
+   - Compila con PyInstaller en modo `--onefile --windowed`
+     (un solo .exe, sin consola negra de fondo).
+   - Copia automáticamente la carpeta `plantilla/` junto al .exe generado.
+3. Al terminar, vas a encontrar todo listo dentro de la carpeta `dist`:
+   ```
+   dist/
+   ├── SistemaExpensas.exe
+   └── plantilla/
+       ├── recibo.html
+       └── estilo.css
+   ```
+
+**Por qué `plantilla/` no se empaqueta dentro del .exe:** se hizo así
+a propósito, para que puedas editar el diseño del recibo (HTML/CSS) sin
+tener que volver a compilar nada. Si `plantilla/` se empaquetara dentro
+del .exe, cualquier cambio de diseño requeriría recompilar.
+
+---
+
+## 4. Trasladar el programa a otra PC con Windows
+
+Esa PC **no necesita tener Python instalado**: el .exe ya incluye todo
+lo necesario para funcionar.
+
+1. Copiá la carpeta `dist` completa (podés renombrarla, por ejemplo a
+   `C:\SistemaExpensas`).
+2. Asegurate de que, junto al .exe, esté la carpeta `plantilla/`.
+3. Ejecutá `SistemaExpensas.exe`. La primera vez se crearán
+   automáticamente las carpetas `datos/`, `configuracion/` y `edificios/`
+   con los edificios de ejemplo.
+4. Si no querés los datos de ejemplo en la PC definitiva, simplemente
+   borrá esos edificios de prueba desde "Administrar edificios/unidades"
+   y cargá los reales (ver sección 6), o directamente reemplazá el
+   contenido de `datos/edificios.csv` y `datos/unidades.csv` antes del
+   primer uso.
+
+---
+
+## 5. Dónde quedan los datos
+
+Todo se guarda **al lado del .exe**, nunca en carpetas temporales ni
+ocultas del sistema. Si el ejecutable está en:
+
+```
+C:\SistemaExpensas\SistemaExpensas.exe
+```
+
+los datos van a estar en:
+
+```
+C:\SistemaExpensas\datos\edificios.csv
+C:\SistemaExpensas\datos\unidades.csv
+C:\SistemaExpensas\datos\numeracion.csv
+C:\SistemaExpensas\datos\historial.csv
+C:\SistemaExpensas\configuracion\inmobiliaria.csv
+C:\SistemaExpensas\edificios\<Edificio>\recibo_...pdf
+```
+
+Podés abrir cualquiera de esos CSV con Excel para revisar o corregir
+datos manualmente si alguna vez lo necesitás (se guardan en UTF-8 con
+BOM para que Excel muestre bien tildes y "ñ").
+
+---
+
+## 6. Uso diario
+
+1. **Elegí el edificio** en el combo de arriba. Las unidades aparecen solas.
+2. Revisá/ajustá **"Expensas de"** (mes actual por defecto) y
+   **"Gastos de"** (mes anterior por defecto). Son editables.
+3. Tildá las unidades que van a recibir recibo haciendo clic en la
+   primera columna (☐ / ☑). También podés usar
+   **"Seleccionar todas"** / **"Quitar todas"**.
+4. Para poner el mismo importe a todas las seleccionadas: escribilo en
+   **"Importe para selección"** y apretá **"Aplicar importe a
+   seleccionadas"**.
+5. Para un importe distinto en una sola unidad: **doble clic** sobre esa
+   fila (fuera de la columna de tilde) y editalo en el diálogo que se abre.
+   Esto no afecta a las demás unidades.
+6. Apretá **"GENERAR RECIBOS PDF"**. Se pide confirmación y luego se
+   genera un PDF por cada unidad seleccionada, dentro de
+   `edificios/<Edificio>/`.
+
+### Administrar edificios y unidades
+Menú **Administrar → Administrar edificios/unidades**: permite crear
+edificios nuevos, agregar unidades, editar piso/tipo/unidad/inquilino/
+importe, y abrir la carpeta de recibos del edificio.
+
+### Configuración de la inmobiliaria
+Menú **Administrar → Configuración de la inmobiliaria**: nombre,
+dirección, teléfono, email y CUIT que aparecen en todos los recibos.
+
+### Historial
+Menú **Ver → Historial de recibos**: lista completa de todos los
+recibos generados, con filtro por edificio.
+
+### Copia de seguridad
+Menú **Archivo → Copia de seguridad (backup)**: genera un `.zip` con
+las carpetas `datos/` y `configuracion/` dentro de una carpeta
+`backups/` al lado del .exe. Hacelo regularmente, sobre todo antes de
+editar los CSV a mano.
+
+---
+
+## 7. Numeración de recibos
+
+Cada edificio tiene su propio contador, guardado en
+`datos/numeracion.csv`:
+
+```csv
+edificio,ultimo_recibo
+Edificio Alsina 123,4
+Edificio Mitre 456,3
+```
+
+Cada vez que se genera un recibo, el número se incrementa y se guarda
+**inmediatamente** en el CSV (no espera a que termine todo el lote), así
+que si cerrás el programa a mitad de una tanda de recibos, o si se corta
+la luz, la numeración no se pierde ni se repite al volver a abrir el
+programa. Como contracara de esta robustez: si un recibo puntual falla
+al generarse (por ejemplo, un error de permisos de la carpeta), su
+número ya fue consumido y no se reutiliza — igual que en un talonario de
+recibos en papel, donde un número anulado no se vuelve a usar.
+
+---
+
+## 8. Conflictos de nombre de archivo
+
+Si el nombre "natural" del PDF ya existe (por ejemplo, porque ya
+generaste el recibo de esa unidad para ese mes), el archivo existente
+**nunca se sobrescribe**. El nuevo PDF se guarda agregando el número de
+recibo como sufijo:
+
+```
+recibo_expensas_Edificio_Alsina_123_1_A_SEPTIEMBRE.pdf              (ya existía)
+recibo_expensas_Edificio_Alsina_123_1_A_SEPTIEMBRE_00039.pdf        (nuevo)
+```
+
+Los nombres se sanitizan automáticamente quitando caracteres inválidos
+en Windows (`\ / : * ? " < > |`) y reemplazando espacios por guiones
+bajos. Las tildes y la "ñ" se conservan porque son válidas en NTFS.
+
+---
+
+## 9. Cómo modificar el diseño del PDF más adelante
+
+El recibo se genera a partir de dos archivos de texto plano, sin tocar
+código Python:
+
+```
+plantilla/recibo.html   → estructura y textos del recibo
+plantilla/estilo.css    → colores, tipografías, tamaños, layout
+```
+
+Dentro de `recibo.html` vas a ver marcadores como `{{IMPORTE}}` o
+`{{INQUILINO}}`: el programa los reemplaza automáticamente por el dato
+real de cada recibo al generarlo. Podés:
+
+- Cambiar textos fijos (por ejemplo "ADMINISTRACIÓN DE CONSORCIOS").
+- Reordenar secciones, agregar un logo (`<img src="logo.png">`,
+  guardando `logo.png` dentro de la carpeta `plantilla/`).
+- Cambiar colores, fuentes y espaciados en `estilo.css`.
+
+**Importante:** el motor que convierte el HTML en PDF (`xhtml2pdf`)
+soporta un subconjunto de CSS 2.1: anda perfecto con `float`, `table`,
+bordes, colores y tipografías, pero **no soporta `flexbox` ni `grid`**.
+Si vas a rediseñar el layout, usá `float`/`table` como en el ejemplo
+que ya viene armado. Después de editar estos archivos, simplemente
+volvé a generar un recibo de prueba — no hace falta recompilar el .exe.
+
+---
+
+## 10. Robustez y casos especiales ya contemplados
+
+- Importes admitidos: `45000`, `45000,50`, `45.000,50`, `$45.000`,
+  `$ 45.000,50` (formato argentino, con o sin símbolo $).
+- CSV vacíos o inexistentes: se recrean automáticamente con sus
+  encabezados correctos.
+- Nombres de edificios/inquilinos con espacios y tildes: soportado.
+- Unidades "atípicas" (`PB COC 3`, `BAU 14`, etc.): se guardan con
+  columnas separadas `piso`, `tipo`, `unidad`, sin asumir el formato
+  "piso + letra".
+- Ningún error de Python se muestra como traceback: siempre aparece un
+  cuadro de diálogo con un mensaje entendible.
+- Antes de generar recibos se pide confirmación explícita.
+
+---
+
+## 11. Decisiones de diseño que tomé por vos
+
+- **xhtml2pdf en vez de ReportLab directo**: permite mantener el diseño
+  del recibo en HTML/CSS editable en una carpeta `plantilla/` separada,
+  tal como pediste, sin depender de binarios externos (como
+  `wkhtmltopdf`) que complicarían el .exe final.
+- **Identificador interno (`id`) por unidad** en `unidades.csv`: además
+  de piso/tipo/unidad, cada fila tiene un id corto único. Esto permite
+  editar con seguridad una unidad puntual (por ejemplo, si cambiás el
+  piso de "1°" a "2°") sin perder la referencia ni afectar a otras filas
+  con datos parecidos.
+- **Eliminación de unidades**: no se implementó en esta primera versión,
+  tal como sugeriste, para no generar inconsistencias con el historial
+  ya generado. Sí se puede editar cualquier campo de una unidad
+  existente.
+- **Checkbox de selección**: en vez de una librería adicional para
+  checkboxes reales en la tabla, se usa una columna con ☑ / ☐ que se
+  alterna al hacer clic — mismo resultado visual, cero dependencias
+  extra.
+
+---
+
+## 12. Datos de ejemplo incluidos
+
+- **Edificio Alsina 123**: PB 1, 1° A, 1° B, 2° A (deptos) y PB COC 3
+  (cochera).
+- **Edificio Mitre 456**: PB 1, 1° A, 1° B (deptos) y BAU 14 (baulera).
+
+Podés borrarlos o editarlos libremente desde "Administrar
+edificios/unidades" una vez que verifiques que todo funciona.

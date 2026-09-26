@@ -1,0 +1,10 @@
+﻿id,edificio,piso,tipo,unidad,inquilino,importe
+ba1fd7a9,Edificio Alsina 123,PB,DEPTO,1,Ana Pérez,123456.0
+0a9c7d29,Edificio Alsina 123,1°,DEPTO,A,Carlos López,123456789.0
+1f43566b,Edificio Alsina 123,1°,DEPTO,B,María García,45000
+d8d3cf16,Edificio Alsina 123,2°,DEPTO,A,Pedro Rodríguez,48000
+1527f952,Edificio Alsina 123,PB,COCH,3,Juan Gómez,12000
+01e3072a,Edificio Mitre 456,PB,DEPTO,1,Laura Fernández,10000.0
+ac7d6724,Edificio Mitre 456,1°,DEPTO,A,Diego Álvarez,40000
+46b9567a,Edificio Mitre 456,1°,DEPTO,B,Silvia Ruiz,40000
+6658c945,Edificio Mitre 456,BAU,BAU,14,Marcos Sosa,8000
