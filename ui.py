@@ -1722,7 +1722,7 @@ class VentanaMails(tk.Toplevel):
 
     def __init__(self, parent, edificio_inicial=""):
         super().__init__(parent)
-        self.title("Mails")
+        self.title("Mailing")
         self.configure(bg=COLOR_FONDO)
         self.geometry("840x560")
         self.transient(parent)
@@ -1909,7 +1909,7 @@ class _EnviarPorMailMixin:
         if not correo.existe_smtp():
             messagebox.showwarning(
                 "Enviar por mail",
-                "Todavía no cargaste la configuración SMTP (Administrar → Mails → Configuración SMTP).",
+                "Todavía no cargaste la configuración SMTP (Administrar → Mailing → Configuración SMTP).",
                 parent=self)
             return
 
@@ -1958,12 +1958,12 @@ class VentanaHistorial(_AbreRecibosMixin, _EnviarPorMailMixin, tk.Toplevel):
 
         columnas = ("sel", "numero_recibo", "edificio", "fecha", "expensas_de", "tipo", "piso", "unidad", "inquilino", "importe", "archivo")
         titulos = {
-            "sel": "", "numero_recibo": "N°", "edificio": "Edificio", "fecha": "Fecha", "expensas_de": "Expensas de",
+            "sel": "ENVIAR", "numero_recibo": "N°", "edificio": "Edificio", "fecha": "Fecha", "expensas_de": "Expensas de",
             "tipo": "Tipo", "piso": "Piso", "unidad": "Unidad", "inquilino": "Inquilino", "importe": "Importe",
             "archivo": "Archivo",
         }
         anchos = {
-            "sel": 30, "numero_recibo": 60, "edificio": 150, "fecha": 80, "expensas_de": 110,
+            "sel": 55, "numero_recibo": 60, "edificio": 150, "fecha": 80, "expensas_de": 110,
             "tipo": 80, "piso": 55, "unidad": 55, "inquilino": 150, "importe": 90, "archivo": 260,
         }
 
@@ -2040,9 +2040,9 @@ class VentanaRecibosGenerados(_AbreRecibosMixin, _EnviarPorMailMixin, tk.Topleve
         ).pack(fill="x", padx=16, pady=(12, 4))
 
         columnas = ("sel", "numero_recibo", "tipo", "unidad", "inquilino", "importe", "gastos_de", "archivo")
-        titulos = {"sel": "", "numero_recibo": "N°", "tipo": "Tipo", "unidad": "Unidad", "inquilino": "Inquilino",
+        titulos = {"sel": "ENVIAR", "numero_recibo": "N°", "tipo": "Tipo", "unidad": "Unidad", "inquilino": "Inquilino",
                    "importe": "Importe", "gastos_de": "Gastos de", "archivo": "Archivo"}
-        anchos = {"sel": 30, "numero_recibo": 60, "tipo": 80, "unidad": 150, "inquilino": 130,
+        anchos = {"sel": 55, "numero_recibo": 60, "tipo": 80, "unidad": 150, "inquilino": 130,
                   "importe": 90, "gastos_de": 110, "archivo": 250}
         self.tree = ttk.Treeview(self, columns=columnas, show="headings", height=12)
         for c in columnas:
@@ -2082,8 +2082,6 @@ class VentanaRecibosGenerados(_AbreRecibosMixin, _EnviarPorMailMixin, tk.Topleve
         tk.Button(pie, text="Enviar por mail", command=self._enviar_por_mail,
                   bg="#1f7a3d", fg="white", font=FUENTE_BOLD, padx=12, pady=4).pack(side="left", padx=6)
         tk.Button(pie, text="Cerrar", command=self.destroy, padx=12, pady=4).pack(side="right")
-        tk.Label(pie, text="(doble clic en una fila abre el PDF)", bg=COLOR_FONDO,
-                 fg="#666666", font=("Segoe UI", 8)).pack(side="left", padx=10)
 
         if generados:
             self.tree.selection_set("0")
@@ -2129,7 +2127,7 @@ class App(tk.Tk):
         menu_admin = tk.Menu(menubar, tearoff=0)
         menu_admin.add_command(label="Administrar edificios/unidades", command=self._abrir_administracion)
         menu_admin.add_command(label="Configuración de la inmobiliaria", command=self._abrir_configuracion)
-        menu_admin.add_command(label="Mails", command=self._abrir_mails)
+        menu_admin.add_command(label="Mailing", command=self._abrir_mails)
         menu_admin.add_separator()
         menu_admin.add_command(label="Editor de datos (CSV)", command=self._abrir_editor_datos)
         menu_admin.add_separator()

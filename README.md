@@ -362,7 +362,7 @@ la planilla de pagos; los recibos ya generados y el historial no se modifican.
 ### Contraseña maestra
 
 **Administrar edificios/unidades**, **Configuración de la inmobiliaria**,
-**Mails** y el **Editor de datos (CSV)** están protegidos por una contraseña
+**Mailing** y el **Editor de datos (CSV)** están protegidos por una contraseña
 maestra: la piden para abrir cualquiera de las cuatro pantallas, y la vuelven
 a pedir en cada alta, edición o borrado dentro de ellas. El resto de la
 aplicación (pantalla principal, generar recibos, historial y el botón
@@ -452,7 +452,7 @@ con el programa cerrado.
 
 ### Envío de recibos por mail
 
-**Administrar → Mails** guarda, por edificio, hasta 4 direcciones por unidad
+**Administrar → Mailing** guarda, por edificio, hasta 4 direcciones por unidad
 (2 del inquilino y 2 del dueño), en una lista con todas las unidades del
 edificio elegido. Una cochera o baulera **incluida en el total** de su
 departamento no aparece: nunca genera su propio recibo, así que no necesita

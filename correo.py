@@ -249,7 +249,7 @@ def enviar_recibo(fila_historial):
     resultados = []
 
     if not existe_smtp():
-        return [("(smtp)", False, "No hay una configuración SMTP cargada (Administrar → Mails → Configuración SMTP).")]
+        return [("(smtp)", False, "No hay una configuración SMTP cargada (Administrar → Mailing → Configuración SMTP).")]
 
     unidad_id = (fila_historial.get("unidad_id") or "").strip()
     if not unidad_id:
