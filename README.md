@@ -46,6 +46,8 @@ editables.
   inmobiliaria, logo y firma digital.
 - Historial de recibos, editor de tablas, copia de seguridad y archivado de
   edificios dados de baja.
+- Contraseña maestra (hasheada, con pregunta de seguridad) que protege la
+  administración de edificios, unidades, la inmobiliaria y los datos.
 
 ## 2. Requisitos
 
@@ -117,6 +119,7 @@ SistemaExpensas/
 ├── utils.py                Importes, fechas, nombres de archivo, CUIT
 ├── recibo.py               Datos del recibo: formatos, importe en letras, ajuste de textos
 ├── pdf_generator.py        Generación del PDF desde la plantilla
+├── maestro.py               Contraseña maestra (hasheada) de las pantallas de administración
 ├── ui.py                   Interfaz gráfica (Tkinter)
 ├── requirements.txt
 ├── construir_exe.bat
@@ -134,7 +137,7 @@ SistemaExpensas/
 │   ├── historial.csv
 │   ├── pagos_edificios/    Una planilla Excel por edificio
 │   └── edificios_borrados/ Edificios archivados
-├── configuracion/          Inmobiliaria, preferencias, logo y firma
+├── configuracion/          Inmobiliaria, preferencias, logo, firma y contraseña maestra
 ├── edificios/              Una subcarpeta con los PDF de cada edificio
 └── backups/                Copias de seguridad (.zip)
 ```
@@ -155,6 +158,7 @@ temporales ni ocultas del sistema. Para un ejecutable en
 | `configuracion/inmobiliaria.csv` | Datos de la inmobiliaria |
 | `configuracion/preferencias.csv` | Preferencias de la interfaz |
 | `configuracion/logo.png`, `firma.png` | Imágenes de la inmobiliaria |
+| `configuracion/maestro.csv` | Contraseña maestra hasheada y pregunta de seguridad |
 | `edificios/<Edificio>/` | PDF de los recibos |
 
 Los CSV se guardan en UTF-8 con BOM, de modo que Excel muestra correctamente
@@ -347,6 +351,34 @@ bauleras, previa confirmación con la lista completa. Las unidades se quitan de
 la planilla de pagos; los recibos ya generados y el historial no se modifican.
 
 ## 10. Administración
+
+### Contraseña maestra
+
+**Administrar edificios/unidades**, **Configuración de la inmobiliaria** y el
+**Editor de datos (CSV)** están protegidos por una contraseña maestra: la piden
+para abrir cualquiera de las tres pantallas, y la vuelven a pedir en cada alta,
+edición o borrado dentro de ellas. El resto de la aplicación (pantalla
+principal, generar recibos, historial) queda libre.
+
+- **Primera vez:** al abrir cualquiera de esas pantallas sin tener todavía una
+  contraseña creada, la aplicación obliga a crear una (con confirmación) junto
+  con una **pregunta de seguridad** para poder restablecerla si se olvida. Ese
+  mismo paso deja pasar esa vez; no hace falta escribirla de nuevo.
+- **Control maestro:** en **Administrar → Control maestro** se ingresa la
+  contraseña una vez para desbloquear la sesión: mientras esté activo, no
+  vuelve a pedirla ni para abrir ni para guardar nada. Se **bloquea** con el
+  botón correspondiente o al cerrar el programa (nunca queda activo entre una
+  sesión y otra). Desde la misma ventana se cambia la contraseña y la pregunta
+  de seguridad (pide la contraseña actual).
+- **¿Olvidaste tu contraseña?** En el cuadro que la pide hay un enlace para
+  responder la pregunta de seguridad y, si es correcta, elegir una contraseña
+  nueva ahí mismo. Como último recurso, con el programa cerrado, se puede
+  borrar `configuracion/maestro.csv`: la aplicación pide crear una contraseña
+  nueva la próxima vez que se abra una pantalla protegida (se pierde la
+  anterior, no hay otra forma de recuperarla).
+- **Cómo se guarda:** hasheada con PBKDF2-SHA256 y sal aleatoria (nunca en
+  texto plano) en `configuracion/maestro.csv`, junto con la pregunta de
+  seguridad (la respuesta también hasheada). Ver `maestro.py`.
 
 ### Administrar edificios y unidades
 

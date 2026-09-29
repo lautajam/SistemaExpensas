@@ -24,6 +24,7 @@ from tkinter import ttk, messagebox, filedialog
 
 import config
 import database
+import maestro
 from utils import (
     normalizar_cuit,
     parse_importe,
@@ -68,20 +69,274 @@ def mostrar_avisos():
 
 
 # ===========================================================================
+# Contraseña maestra (ver maestro.py): protege abrir Administrar edificios/unidades,
+# Configuración de la inmobiliaria y el Editor de datos (CSV), y cada alta/edición/
+# borrado dentro de ellas.
+#
+# Todos estos diálogos son asincrónicos (como el resto de la app: on_guardar/on_ok en
+# vez de bloquear), para no depender de un mainloop anidado.
+# ===========================================================================
+
+def requerir_maestro(parent, on_ok):
+    """
+    Gate de una acción protegida por la contraseña maestra (abrir una de esas tres
+    pantallas, o guardar/borrar algo dentro de ellas). Con el control maestro activo
+    llama a on_ok() de una: no pregunta nada. Si todavía no hay contraseña creada,
+    obliga a crear una. Si se cancela o se pone una contraseña incorrecta, no llama a
+    on_ok(): quien invoca no tiene que hacer nada más (la acción queda abortada).
+    """
+    if maestro.esta_activo():
+        on_ok()
+        return
+    if not maestro.existe():
+        DialogoCrearMaestro(parent, on_ok=on_ok)
+        return
+    DialogoPedirPassword(parent, on_ok=on_ok)
+
+
+class DialogoCrearMaestro(tk.Toplevel):
+    """Crea (o reemplaza) la contraseña maestra y su pregunta de seguridad."""
+
+    def __init__(self, parent, on_ok=None, motivo=None):
+        super().__init__(parent)
+        self.on_ok = on_ok
+        self.title("Crear contraseña maestra")
+        self.configure(bg=COLOR_FONDO)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
+        cont.pack(fill="both", expand=True)
+        tk.Label(
+            cont, justify="left", wraplength=340, font=FUENTE_NORMAL, bg=COLOR_FONDO,
+            text=motivo or "Esta contraseña se va a pedir para administrar edificios, "
+                          "unidades, la inmobiliaria y los datos.",
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        self.var_pw = tk.StringVar()
+        self.var_pw2 = tk.StringVar()
+        self.var_pregunta = tk.StringVar()
+        self.var_respuesta = tk.StringVar()
+        campos = [
+            ("Contraseña nueva:", self.var_pw, True),
+            ("Repetir contraseña:", self.var_pw2, True),
+            ("Pregunta de seguridad:", self.var_pregunta, False),
+            ("Respuesta:", self.var_respuesta, False),
+        ]
+        for i, (etiqueta, var, oculto) in enumerate(campos, start=1):
+            tk.Label(cont, text=etiqueta, font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(
+                row=i, column=0, sticky="w", pady=4)
+            entrada = tk.Entry(cont, textvariable=var, width=30, font=FUENTE_NORMAL,
+                               show="*" if oculto else "")
+            entrada.grid(row=i, column=1, pady=4, padx=(10, 0))
+            if i == 1:
+                entrada.focus_set()
+
+        tk.Label(
+            cont, justify="left", font=("Segoe UI", 8), fg="#666666", bg=COLOR_FONDO,
+            text="Guardala bien: si la olvidás, se restablece con la pregunta de seguridad\n"
+                 "(o borrando configuracion/maestro.csv con el programa cerrado).",
+        ).grid(row=len(campos) + 1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        botones = tk.Frame(cont, bg=COLOR_FONDO)
+        botones.grid(row=len(campos) + 2, column=0, columnspan=2, pady=(14, 0))
+        tk.Button(botones, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
+                  fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
+        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+
+    def _guardar(self):
+        if self.var_pw.get() != self.var_pw2.get():
+            messagebox.showwarning("Contraseñas distintas", "Las dos contraseñas no coinciden.", parent=self)
+            return
+        try:
+            maestro.crear(self.var_pw.get(), self.var_pregunta.get(), self.var_respuesta.get())
+        except ValueError as e:
+            messagebox.showwarning("Datos incompletos", str(e), parent=self)
+            return
+        self.destroy()
+        if self.on_ok:
+            self.on_ok()
+
+
+class DialogoPedirPassword(tk.Toplevel):
+    """Pide la contraseña maestra para una sola acción (no activa el control maestro)."""
+
+    def __init__(self, parent, on_ok=None, titulo="Contraseña maestra"):
+        super().__init__(parent)
+        self.on_ok = on_ok
+        self.title(titulo)
+        self.configure(bg=COLOR_FONDO)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
+        cont.pack(fill="both", expand=True)
+        tk.Label(cont, text="Contraseña:", font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(row=0, column=0, sticky="w")
+        self.var_pw = tk.StringVar()
+        entrada = tk.Entry(cont, textvariable=self.var_pw, width=26, font=FUENTE_NORMAL, show="*")
+        entrada.grid(row=0, column=1, padx=(10, 0))
+        entrada.bind("<Return>", lambda e: self._confirmar())
+        entrada.focus_set()
+
+        self.lbl_error = tk.Label(cont, text="", font=("Segoe UI", 8), fg="#b3261e", bg=COLOR_FONDO)
+        self.lbl_error.grid(row=1, column=0, columnspan=2, sticky="w")
+
+        link = tk.Label(cont, text="¿Olvidaste tu contraseña?", font=("Segoe UI", 8, "underline"),
+                        fg="#1a3d5c", bg=COLOR_FONDO, cursor="hand2")
+        link.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        link.bind("<Button-1>", lambda e: self._olvidada())
+
+        botones = tk.Frame(cont, bg=COLOR_FONDO)
+        botones.grid(row=3, column=0, columnspan=2, pady=(14, 0))
+        tk.Button(botones, text="Confirmar", command=self._confirmar, bg=COLOR_PRIMARIO,
+                  fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
+        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+
+    def _confirmar(self):
+        if maestro.verificar_password(self.var_pw.get()):
+            self.destroy()
+            if self.on_ok:
+                self.on_ok()
+            return
+        self.lbl_error.config(text="Contraseña incorrecta.")
+        self.var_pw.set("")
+
+    def _olvidada(self):
+        def al_recuperar():
+            self.destroy()
+            if self.on_ok:
+                self.on_ok()
+        DialogoRecuperarMaestro(self, on_ok=al_recuperar)
+
+
+class DialogoRecuperarMaestro(tk.Toplevel):
+    """Restablece la contraseña maestra respondiendo la pregunta de seguridad."""
+
+    def __init__(self, parent, on_ok=None):
+        super().__init__(parent)
+        self.on_ok = on_ok
+        self.title("Restablecer contraseña maestra")
+        self.configure(bg=COLOR_FONDO)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
+        cont.pack(fill="both", expand=True)
+        tk.Label(cont, text=maestro.obtener_pregunta() or "", font=FUENTE_BOLD, bg=COLOR_FONDO,
+                 wraplength=320, justify="left").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        tk.Label(cont, text="Respuesta:", font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(row=1, column=0, sticky="w")
+        self.var_resp = tk.StringVar()
+        entrada = tk.Entry(cont, textvariable=self.var_resp, width=28, font=FUENTE_NORMAL)
+        entrada.grid(row=1, column=1, padx=(10, 0))
+        entrada.bind("<Return>", lambda e: self._verificar())
+        entrada.focus_set()
+
+        self.lbl_error = tk.Label(cont, text="", font=("Segoe UI", 8), fg="#b3261e", bg=COLOR_FONDO)
+        self.lbl_error.grid(row=2, column=0, columnspan=2, sticky="w")
+
+        botones = tk.Frame(cont, bg=COLOR_FONDO)
+        botones.grid(row=3, column=0, columnspan=2, pady=(14, 0))
+        tk.Button(botones, text="Verificar", command=self._verificar, bg=COLOR_PRIMARIO,
+                  fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
+        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+
+    def _verificar(self):
+        if not maestro.verificar_respuesta(self.var_resp.get()):
+            self.lbl_error.config(text="Respuesta incorrecta.")
+            self.var_resp.set("")
+            return
+        # Respuesta correcta: se deja poner una contraseña (y pregunta) nueva ahí mismo.
+        def al_crear():
+            self.destroy()
+            if self.on_ok:
+                self.on_ok()
+        DialogoCrearMaestro(self, on_ok=al_crear, motivo="Respuesta correcta. Elegí una contraseña nueva:")
+
+
+class VentanaControlMaestro(tk.Toplevel):
+    """Menú Administrar → Control maestro: activar/bloquear la sesión y cambiar la contraseña."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Control maestro")
+        self.configure(bg=COLOR_FONDO)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self._cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
+        self._cont.pack(fill="both", expand=True)
+        self._dibujar()
+
+    def _dibujar(self):
+        for w in self._cont.winfo_children():
+            w.destroy()
+
+        if not maestro.existe():
+            tk.Label(self._cont, text="Todavía no configuraste una contraseña maestra.\n"
+                     "Mientras tanto, administrar edificios, unidades y la\n"
+                     "inmobiliaria queda libre, sin pedir nada.",
+                     font=FUENTE_NORMAL, bg=COLOR_FONDO, justify="left").pack(anchor="w")
+            tk.Button(self._cont, text="Crear contraseña maestra", command=self._crear,
+                      bg=COLOR_PRIMARIO, fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(
+                anchor="w", pady=(12, 0))
+            return
+
+        if maestro.esta_activo():
+            tk.Label(self._cont, text="Control maestro ACTIVO.", font=FUENTE_BOLD, bg=COLOR_FONDO,
+                     fg="#1f7a3d").pack(anchor="w")
+            tk.Label(self._cont, justify="left", font=FUENTE_NORMAL, bg=COLOR_FONDO,
+                     text="No te va a pedir la contraseña hasta que lo bloquees\no cierres el programa.").pack(
+                anchor="w", pady=(2, 12))
+            tk.Button(self._cont, text="Bloquear", command=self._bloquear, bg="#b3261e",
+                      fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(anchor="w")
+        else:
+            tk.Label(self._cont, text="Control maestro bloqueado.", font=FUENTE_BOLD, bg=COLOR_FONDO).pack(anchor="w")
+            tk.Label(self._cont, justify="left", font=FUENTE_NORMAL, bg=COLOR_FONDO,
+                     text="Desbloquealo para administrar sin que te pida la\ncontraseña en cada acción.").pack(
+                anchor="w", pady=(2, 12))
+            tk.Button(self._cont, text="Desbloquear", command=self._desbloquear, bg=COLOR_PRIMARIO,
+                      fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(anchor="w")
+
+        tk.Frame(self._cont, bg="#cccccc", height=1).pack(fill="x", pady=14)
+        tk.Button(self._cont, text="Cambiar contraseña / pregunta", command=self._cambiar).pack(anchor="w")
+
+    def _crear(self):
+        DialogoCrearMaestro(self, on_ok=self._dibujar)
+
+    def _desbloquear(self):
+        def al_confirmar():
+            maestro.activar()
+            self._dibujar()
+        DialogoPedirPassword(self, on_ok=al_confirmar)
+
+    def _bloquear(self):
+        maestro.desactivar()
+        self._dibujar()
+
+    def _cambiar(self):
+        def al_confirmar():
+            DialogoCrearMaestro(self, on_ok=self._dibujar, motivo="Nueva contraseña maestra:")
+        DialogoPedirPassword(self, on_ok=al_confirmar, titulo="Confirmá la contraseña actual")
+
+
+# ===========================================================================
 # Diálogo: alta / edición de unidad (depto, local, cochera o baulera)
 # ===========================================================================
 
 NINGUNO = "(ninguno)"
 
 
-def confirmar_y_borrar(parent, unidad_id):
+def confirmar_y_borrar(parent, unidad_id, on_borrado=None):
     """
-    Muestra qué se va a borrar (la unidad y, si es un depto, sus cocheras y
-    bauleras), pide confirmación y borra. Devuelve True si se borró.
+    Muestra qué se va a borrar (la unidad y, si es un depto, sus cocheras y bauleras),
+    pide confirmación y la contraseña maestra, y borra. Si se borra, llama a on_borrado().
     """
     afectadas = database.unidades_a_borrar(unidad_id)
     if not afectadas:
-        return False
+        return
     por_id = indice_por_id(database.get_unidades_por_edificio(afectadas[0]["edificio"]))
     lineas = [
         f"  • {etiqueta_unidad(u, por_id)}" + (f" — {u['inquilino']}" if u["inquilino"] else "")
@@ -97,14 +352,19 @@ def confirmar_y_borrar(parent, unidad_id):
         "y el historial no se borran.\nEsta acción no se puede deshacer.\n\n¿Borrar?",
         icon="warning", parent=parent,
     ):
-        return False
-    try:
-        database.delete_unidad(unidad_id)
-    except Exception as e:
-        manejar_error("No se pudo borrar la unidad", e)
-        return False
-    mostrar_avisos()
-    return True
+        return
+
+    def borrar_de_verdad():
+        try:
+            database.delete_unidad(unidad_id)
+        except Exception as e:
+            manejar_error("No se pudo borrar la unidad", e)
+            return
+        mostrar_avisos()
+        if on_borrado:
+            on_borrado()
+
+    requerir_maestro(parent, borrar_de_verdad)
 
 
 # Cómo paga una cochera/baulera de un depto: (código guardado, texto para elegir, texto corto de la lista)
@@ -489,10 +749,11 @@ class DialogoUnidad(tk.Toplevel):
         self._mostrar_modo_item()
 
     def _borrar(self):
-        if confirmar_y_borrar(self, self.unidad["id"]):
+        def al_borrar():
             if self.on_guardar:
                 self.on_guardar()
             self.destroy()
+        confirmar_y_borrar(self, self.unidad["id"], on_borrado=al_borrar)
 
     def _guardar(self):
         tipo = self._tipo()
@@ -529,37 +790,40 @@ class DialogoUnidad(tk.Toplevel):
         if nuevas_celdas and not confirmar_modo_celdas(self, self.edificio):
             return
 
-        try:
-            if self.unidad:
-                database.update_unidad(
-                    self.unidad["id"],
-                    piso=piso, tipo=tipo, unidad=unidad_txt, uf=uf, dueno=dueno,
-                    inquilino=inquilino, importe=str(importe), depto_id=depto_id,
-                    paga_junto=modo, celda=celda,
-                )
-                depto_propio = self.unidad["id"]
-                for asociada_id in self._a_desvincular:
-                    database.update_unidad(asociada_id, depto_id="")
-                if asociadas:
-                    database.add_asociadas(depto_propio, asociadas)
-            else:
-                depto_propio = database.add_unidad(self.edificio, piso, tipo, unidad_txt, inquilino, importe,
-                                                   depto_id=depto_id, asociadas=asociadas, uf=uf, dueno=dueno,
-                                                   paga_junto=modo, celda=celda)
-            for it in a_vincular:
-                campos = {"depto_id": depto_propio, "paga_junto": it["modo"]}
-                if not self._por_id[it["id"]]["inquilino"]:
-                    campos["inquilino"] = inquilino
-                database.update_unidad(it["id"], **campos)
-            for it in a_cambiar:
-                database.update_unidad(it["id"], paga_junto=it["modo"])
+        def guardar_de_verdad():
+            try:
+                if self.unidad:
+                    database.update_unidad(
+                        self.unidad["id"],
+                        piso=piso, tipo=tipo, unidad=unidad_txt, uf=uf, dueno=dueno,
+                        inquilino=inquilino, importe=str(importe), depto_id=depto_id,
+                        paga_junto=modo, celda=celda,
+                    )
+                    depto_propio = self.unidad["id"]
+                    for asociada_id in self._a_desvincular:
+                        database.update_unidad(asociada_id, depto_id="")
+                    if asociadas:
+                        database.add_asociadas(depto_propio, asociadas)
+                else:
+                    depto_propio = database.add_unidad(self.edificio, piso, tipo, unidad_txt, inquilino, importe,
+                                                       depto_id=depto_id, asociadas=asociadas, uf=uf, dueno=dueno,
+                                                       paga_junto=modo, celda=celda)
+                for it in a_vincular:
+                    campos = {"depto_id": depto_propio, "paga_junto": it["modo"]}
+                    if not self._por_id[it["id"]]["inquilino"]:
+                        campos["inquilino"] = inquilino
+                    database.update_unidad(it["id"], **campos)
+                for it in a_cambiar:
+                    database.update_unidad(it["id"], paga_junto=it["modo"])
 
-            mostrar_avisos()
-            if self.on_guardar:
-                self.on_guardar()
-            self.destroy()
-        except Exception as e:
-            manejar_error("No se pudo guardar la unidad", e)
+                mostrar_avisos()
+                if self.on_guardar:
+                    self.on_guardar()
+                self.destroy()
+            except Exception as e:
+                manejar_error("No se pudo guardar la unidad", e)
+
+        requerir_maestro(self, guardar_de_verdad)
 
 
 # ===========================================================================
@@ -598,14 +862,18 @@ class DialogoEdificioNuevo(tk.Toplevel):
         if not nombre:
             messagebox.showwarning("Datos incompletos", "Ingresá un nombre de edificio.")
             return
-        try:
-            database.add_edificio(nombre)
-            mostrar_avisos()
-            if self.on_guardar:
-                self.on_guardar(nombre)
-            self.destroy()
-        except Exception as e:
-            manejar_error("No se pudo crear el edificio", e)
+
+        def guardar_de_verdad():
+            try:
+                database.add_edificio(nombre)
+                mostrar_avisos()
+                if self.on_guardar:
+                    self.on_guardar(nombre)
+                self.destroy()
+            except Exception as e:
+                manejar_error("No se pudo crear el edificio", e)
+
+        requerir_maestro(self, guardar_de_verdad)
 
 
 # ===========================================================================
@@ -686,28 +954,31 @@ class DialogoDatosConsorcio(tk.Toplevel):
         ):
             return
 
-        try:
-            nombre_final = database.update_edificio(self.nombre_original, **datos)
-        except PermissionError:
-            messagebox.showwarning(
-                "Archivos abiertos",
-                "No se pudo cambiar el nombre porque hay archivos abiertos de este consorcio "
-                "(la planilla de pagos en Excel o algún PDF de sus recibos).\n\n"
-                "Cerralos y probá de nuevo. No se modificó nada.",
-                parent=self,
-            )
-            return
-        except ValueError as e:
-            messagebox.showwarning("No se pudo guardar", str(e), parent=self)
-            return
-        except Exception as e:
-            manejar_error("No se pudieron guardar los datos del consorcio", e)
-            return
+        def guardar_de_verdad():
+            try:
+                nombre_final = database.update_edificio(self.nombre_original, **datos)
+            except PermissionError:
+                messagebox.showwarning(
+                    "Archivos abiertos",
+                    "No se pudo cambiar el nombre porque hay archivos abiertos de este consorcio "
+                    "(la planilla de pagos en Excel o algún PDF de sus recibos).\n\n"
+                    "Cerralos y probá de nuevo. No se modificó nada.",
+                    parent=self,
+                )
+                return
+            except ValueError as e:
+                messagebox.showwarning("No se pudo guardar", str(e), parent=self)
+                return
+            except Exception as e:
+                manejar_error("No se pudieron guardar los datos del consorcio", e)
+                return
 
-        mostrar_avisos()
-        if self.on_guardar:
-            self.on_guardar(nombre_final)
-        self.destroy()
+            mostrar_avisos()
+            if self.on_guardar:
+                self.on_guardar(nombre_final)
+            self.destroy()
+
+        requerir_maestro(self, guardar_de_verdad)
 
 
 # ===========================================================================
@@ -757,24 +1028,28 @@ class DialogoBorrarEdificio(tk.Toplevel):
     def _borrar(self):
         if self.var_nombre.get().strip() != self.edificio:
             return
-        try:
-            destino = database.delete_edificio(self.edificio)
-        except PermissionError:
-            messagebox.showwarning(
-                "Archivos abiertos",
-                "No se pudo borrar porque hay archivos abiertos de este edificio (la planilla de pagos en "
-                "Excel o algún PDF de sus recibos).\n\nCerralos y probá de nuevo. No se modificó nada.",
-                parent=self)
-            return
-        except ValueError as e:
-            messagebox.showwarning("No se pudo borrar", str(e), parent=self)
-            return
-        except Exception as e:
-            manejar_error("No se pudo borrar el edificio", e)
-            return
-        self.destroy()
-        if self.on_borrado:
-            self.on_borrado(destino)
+
+        def borrar_de_verdad():
+            try:
+                destino = database.delete_edificio(self.edificio)
+            except PermissionError:
+                messagebox.showwarning(
+                    "Archivos abiertos",
+                    "No se pudo borrar porque hay archivos abiertos de este edificio (la planilla de pagos en "
+                    "Excel o algún PDF de sus recibos).\n\nCerralos y probá de nuevo. No se modificó nada.",
+                    parent=self)
+                return
+            except ValueError as e:
+                messagebox.showwarning("No se pudo borrar", str(e), parent=self)
+                return
+            except Exception as e:
+                manejar_error("No se pudo borrar el edificio", e)
+                return
+            self.destroy()
+            if self.on_borrado:
+                self.on_borrado(destino)
+
+        requerir_maestro(self, borrar_de_verdad)
 
 
 # ===========================================================================
@@ -857,27 +1132,31 @@ class VentanaAsignarCeldas(tk.Toplevel):
             icon="warning", parent=self,
         ):
             return
-        try:
-            database.set_celdas(self.edificio, celdas)
-        except ValueError as e:
-            messagebox.showwarning("No se pudo guardar", str(e), parent=self)
-            return
-        except Exception as e:
-            manejar_error("No se pudieron guardar las celdas", e)
-            return
-        if habia and not habra:
+
+        def guardar_de_verdad():
             try:
-                database.sincronizar_pagos(self.edificio, reemplazar_ajena=True)
-            except PermissionError:
-                messagebox.showwarning(
-                    "Planilla abierta",
-                    "Se quitaron las celdas, pero la planilla está abierta en Excel y no se pudo rearmar.\n"
-                    "Cerrala: se rearma sola la próxima vez que se guarde algo.", parent=self)
+                database.set_celdas(self.edificio, celdas)
+            except ValueError as e:
+                messagebox.showwarning("No se pudo guardar", str(e), parent=self)
+                return
             except Exception as e:
-                manejar_error("No se pudo rearmar la planilla de pagos", e)
-        if self.on_guardar:
-            self.on_guardar()
-        self.destroy()
+                manejar_error("No se pudieron guardar las celdas", e)
+                return
+            if habia and not habra:
+                try:
+                    database.sincronizar_pagos(self.edificio, reemplazar_ajena=True)
+                except PermissionError:
+                    messagebox.showwarning(
+                        "Planilla abierta",
+                        "Se quitaron las celdas, pero la planilla está abierta en Excel y no se pudo rearmar.\n"
+                        "Cerrala: se rearma sola la próxima vez que se guarde algo.", parent=self)
+                except Exception as e:
+                    manejar_error("No se pudo rearmar la planilla de pagos", e)
+            if self.on_guardar:
+                self.on_guardar()
+            self.destroy()
+
+        requerir_maestro(self, guardar_de_verdad)
 
 
 # ===========================================================================
@@ -982,8 +1261,7 @@ class VentanaAdministracion(tk.Toplevel):
         if not seleccion:
             messagebox.showinfo("Borrar unidad", "Seleccioná primero una unidad de la lista.")
             return
-        if confirmar_y_borrar(self, seleccion[0]):
-            self._recargar()
+        confirmar_y_borrar(self, seleccion[0], on_borrado=self._recargar)
 
     def _nuevo_edificio(self):
         def al_guardar(nombre):
@@ -1180,15 +1458,18 @@ class VentanaEditorDatos(tk.Toplevel):
         return int(seleccion[0])
 
     def _guardar_y_refrescar(self):
-        try:
-            database.guardar_tabla(self._clave_actual, self._filas_actuales)
-        except Exception as e:
-            manejar_error("No se pudo guardar la tabla", e)
-            return
-        mostrar_avisos()
-        self._cargar_tabla()
-        if self.on_cambios:
-            self.on_cambios()
+        def guardar_de_verdad():
+            try:
+                database.guardar_tabla(self._clave_actual, self._filas_actuales)
+            except Exception as e:
+                manejar_error("No se pudo guardar la tabla", e)
+                return
+            mostrar_avisos()
+            self._cargar_tabla()
+            if self.on_cambios:
+                self.on_cambios()
+
+        requerir_maestro(self, guardar_de_verdad)
 
     def _agregar_fila(self):
         def al_guardar(fila_nueva):
@@ -1336,18 +1617,21 @@ class VentanaConfiguracion(tk.Toplevel):
         self._mostrar_vista(clave, None)
 
     def _guardar(self):
-        try:
-            datos = {clave: var.get().strip() for clave, var in self.vars.items()}
-            database.save_inmobiliaria(datos)
-            for clave, ruta in self._imagenes.items():
-                if ruta is None:
-                    database.quitar_imagen_inmobiliaria(clave)
-                else:
-                    database.guardar_imagen_inmobiliaria(clave, ruta)
-            messagebox.showinfo("Configuración", "Los datos de la inmobiliaria se guardaron correctamente.")
-            self.destroy()
-        except Exception as e:
-            manejar_error("No se pudo guardar la configuración", e)
+        def guardar_de_verdad():
+            try:
+                datos = {clave: var.get().strip() for clave, var in self.vars.items()}
+                database.save_inmobiliaria(datos)
+                for clave, ruta in self._imagenes.items():
+                    if ruta is None:
+                        database.quitar_imagen_inmobiliaria(clave)
+                    else:
+                        database.guardar_imagen_inmobiliaria(clave, ruta)
+                messagebox.showinfo("Configuración", "Los datos de la inmobiliaria se guardaron correctamente.")
+                self.destroy()
+            except Exception as e:
+                manejar_error("No se pudo guardar la configuración", e)
+
+        requerir_maestro(self, guardar_de_verdad)
 
 
 # ===========================================================================
@@ -1562,6 +1846,8 @@ class App(tk.Tk):
         menu_admin.add_command(label="Configuración de la inmobiliaria", command=self._abrir_configuracion)
         menu_admin.add_separator()
         menu_admin.add_command(label="Editor de datos (CSV)", command=self._abrir_editor_datos)
+        menu_admin.add_separator()
+        menu_admin.add_command(label="Control maestro", command=self._abrir_control_maestro)
         menubar.add_cascade(label="Administrar", menu=menu_admin)
 
         menu_ver = tk.Menu(menubar, tearoff=0)
@@ -2076,13 +2362,17 @@ class App(tk.Tk):
         self._cargar_unidades()
 
     def _abrir_administracion(self):
-        VentanaAdministracion(self, self.var_edificio.get() or "", on_cambios=self._refrescar_edificios)
+        requerir_maestro(self, lambda: VentanaAdministracion(
+            self, self.var_edificio.get() or "", on_cambios=self._refrescar_edificios))
 
     def _abrir_configuracion(self):
-        VentanaConfiguracion(self)
+        requerir_maestro(self, lambda: VentanaConfiguracion(self))
 
     def _abrir_editor_datos(self):
-        VentanaEditorDatos(self, on_cambios=self._refrescar_edificios)
+        requerir_maestro(self, lambda: VentanaEditorDatos(self, on_cambios=self._refrescar_edificios))
+
+    def _abrir_control_maestro(self):
+        VentanaControlMaestro(self)
 
     def _abrir_historial(self):
         VentanaHistorial(self)

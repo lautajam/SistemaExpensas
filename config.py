@@ -46,6 +46,9 @@ EDIFICIOS_BORRADOS_DIR = os.path.join(DATOS_DIR, "edificios_borrados")
 INMOBILIARIA_CSV = os.path.join(CONFIG_DIR, "inmobiliaria.csv")
 PREFERENCIAS_CSV = os.path.join(CONFIG_DIR, "preferencias.csv")
 
+# Contraseña maestra (hasheada) que protege las pantallas de administración
+MAESTRO_CSV = os.path.join(CONFIG_DIR, "maestro.csv")
+
 # Imágenes de la inmobiliaria (se guardan siempre como PNG en configuracion/)
 IMAGENES_INMOBILIARIA = {
     "logo": os.path.join(CONFIG_DIR, "logo.png"),
