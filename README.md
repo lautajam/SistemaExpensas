@@ -169,29 +169,30 @@ tildes y «ñ». Si un archivo falta o está vacío, se recrea con sus encabezad
    corriente y **Gastos de** el mes anterior, salvo que la planilla de pagos
    indique otra cosa (sección 8). La regla de los meses está en
    `obtener_periodos()` de `utils.py`.
-3. Marcar las unidades con la casilla de la primera columna (☐ / ☑), o usar
+3. Marcar las unidades con la casilla de la última columna (☐ / ☑), o usar
    **Seleccionar todas** / **Quitar todas**.
 4. Cargar los importes con **Actualizar montos desde planilla**. Para un
    importe puntual distinto, se edita la unidad con doble clic sobre su fila.
 5. Pulsar **GENERAR RECIBOS PDF**. Tras la confirmación se genera un PDF por
    cada recibo en `edificios/<Edificio>/`.
-6. Al terminar se muestra el resultado. Con la casilla **Mostrar lista de PDF
-   al terminar** activada, se abre en su lugar una ventana con los recibos
-   generados, desde la que pueden abrirse (**Abrir PDF** o doble clic) o
-   ubicarse en su carpeta (**Mostrar en carpeta**). La opción se conserva en
-   `configuracion/preferencias.csv` y viene desactivada de fábrica.
+6. Al terminar, si se generó al menos un recibo, se abre una ventana con los
+   recibos generados, desde la que pueden abrirse (**Abrir PDF** o doble
+   clic) o ubicarse en su carpeta (**Mostrar en carpeta**). Si no se generó
+   ninguno, se muestra un mensaje con el detalle del error.
 
 ### Columnas de la pantalla principal
 
+Orden de izquierda a derecha:
+
 | Columna | Descripción |
 |---|---|
-| RECIBO | Círculo **verde** si el recibo de la unidad ya se generó para las expensas del período actual; **rojo** si no. Se calcula a partir del historial y se actualiza al generar. Un grupo que paga junto se marca según el recibo del departamento. |
-| Casilla | Selección para generar. |
-| PISO, TIPO, LETRA/N°, UF | Identificación de la unidad. |
+| EMITIDO | Círculo **verde** si el recibo de la unidad ya se generó para las expensas del período actual; **rojo** si no. Se calcula a partir del historial y se actualiza al generar. Un grupo que paga junto se marca según el recibo del departamento. Por una limitación de la tabla, esta columna va fija a la izquierda de todo. |
+| TIPO, PISO, LETRA/N°, UF | Identificación de la unidad. |
 | RELACIÓN | Departamento al que pertenece una cochera o baulera (`de 1° A`), o sus asociadas incluidas en el recibo (`con Cochera 6`). |
 | DUEÑO, INQUILINO | Datos de la unidad. |
 | IMPORTE | Monto del recibo. |
 | PAGO | Estado según la planilla: Total, A cta., Deuda, No pagado o Sin celda. |
+| Casilla | Selección para generar, al final de todo. |
 
 ## 8. Planilla de pagos
 

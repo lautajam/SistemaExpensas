@@ -54,8 +54,6 @@ FUENTE_BOLD = ("Segoe UI", 10, "bold")
 MARCADO = "☑"
 DESMARCADO = "☐"
 
-PREF_MOSTRAR_LISTA = "mostrar_lista_pdf"
-
 
 def manejar_error(titulo, error):
     """Muestra un mensaje de error comprensible y registra el detalle en consola."""
@@ -1619,23 +1617,26 @@ class App(tk.Tk):
         cont = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=8)
         cont.pack(fill="both", expand=True)
 
-        columnas = ("sel", "piso", "tipo", "unidad", "uf", "depto", "dueno", "inquilino", "importe", "estado")
-        # La columna #0 (a la izquierda) lleva el círculo verde/rojo de "recibo emitido"
+        # Orden: tipo, piso, letra/n°, UF, relación, dueño, inquilino, importe, pago, tilde (al final).
+        # La columna #0 (a la izquierda de todo) lleva el círculo verde/rojo de "emitido": en un
+        # Treeview solo esa columna admite un ícono, así que queda ahí aunque no sea la primera de la lista.
+        columnas = ("tipo", "piso", "unidad", "uf", "depto", "dueno", "inquilino", "importe", "estado", "sel")
         self.tree = ttk.Treeview(cont, columns=columnas, show=("tree", "headings"), selectmode="none")
         self.icono_emitido = self._crear_circulo("#2e9e4f", "#1b6b33")
         self.icono_pendiente = self._crear_circulo("#e0392b", "#9c2116")
-        self.tree.heading("#0", text="RECIBO")
+        self.tree.heading("#0", text="EMITIDO")
         self.tree.column("#0", width=64, minwidth=64, stretch=False, anchor="center")
 
-        titulos = {"sel": "", "piso": "PISO", "tipo": "TIPO", "unidad": "LETRA/N°", "uf": "UF",
+        titulos = {"sel": "EMITIR", "piso": "PISO", "tipo": "TIPO", "unidad": "LETRA/N°", "uf": "UF",
                    "depto": "RELACIÓN", "dueno": "DUEÑO", "inquilino": "INQUILINO",
                    "importe": "IMPORTE", "estado": "PAGO"}
-        anchos = {"sel": 34, "piso": 50, "tipo": 78, "unidad": 65, "uf": 45, "depto": 190,
+        anchos = {"sel": 58, "piso": 50, "tipo": 78, "unidad": 65, "uf": 45, "depto": 190,
                   "dueno": 110, "inquilino": 110, "importe": 100, "estado": 80}
         for c in columnas:
             self.tree.heading(c, text=titulos[c])
             self.tree.column(c, width=anchos[c],
                               anchor="w" if c in ("dueno", "inquilino") else "center")
+        self._col_sel = f"#{len(columnas)}"    # id de columna que usa identify_column (la tilde, ahora la última)
         for tag, color in (("total", "#1f7a3d"), ("parcial", "#b26a00"),
                            ("deuda", "#b3261e"), ("nopagado", "#666666")):
             self.tree.tag_configure(tag, foreground=color)
@@ -1648,18 +1649,10 @@ class App(tk.Tk):
         self.tree.bind("<Button-1>", self._click_en_tabla)
         self.tree.bind("<Double-1>", self._doble_click_en_tabla)
 
-        ayuda = tk.Label(
-            self, bg=COLOR_FONDO, fg="#666666", font=("Segoe UI", 8),
-            text="Clic en la casilla para seleccionar/deseleccionar. Doble clic en el resto de la fila para editar la unidad. "
-                 "RECIBO: círculo verde = ya se emitió el recibo de las expensas del período; rojo = todavía no.",
-        )
-        ayuda.pack(anchor="w", padx=18)
-
     def _crear_pie(self):
         pie = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=10)
         pie.pack(fill="x")
 
-        tk.Button(pie, text="+ Nueva unidad", command=self._nueva_unidad).pack(side="left", padx=(0, 16))
         tk.Button(pie, text="Seleccionar todas", command=self._seleccionar_todas).pack(side="left")
         tk.Button(pie, text="Quitar todas", command=self._quitar_todas).pack(side="left", padx=8)
         tk.Button(pie, text="Abrir planilla de pagos", command=self._abrir_planilla_pagos).pack(side="left", padx=8)
@@ -1668,19 +1661,6 @@ class App(tk.Tk):
             pie, text="GENERAR RECIBOS PDF", command=self._generar_recibos,
             bg="#1f7a3d", fg="white", font=("Segoe UI", 11, "bold"), padx=18, pady=8
         ).pack(side="right")
-
-        self.var_mostrar_lista = tk.BooleanVar(value=database.get_preferencia(PREF_MOSTRAR_LISTA, "0") == "1")
-        tk.Checkbutton(
-            pie, text="Mostrar lista de PDF al terminar", variable=self.var_mostrar_lista,
-            command=self._guardar_preferencia_lista, bg=COLOR_FONDO, activebackground=COLOR_FONDO,
-            font=FUENTE_NORMAL,
-        ).pack(side="right", padx=(0, 16))
-
-    def _guardar_preferencia_lista(self):
-        try:
-            database.set_preferencia(PREF_MOSTRAR_LISTA, "1" if self.var_mostrar_lista.get() else "0")
-        except Exception as e:
-            manejar_error("No se pudo guardar la preferencia", e)
 
     # -----------------------------------------------------------------
     # Carga de datos en pantalla
@@ -1732,10 +1712,10 @@ class App(tk.Tk):
             relacion = ""
         importe = sum(parse_importe(m["importe"]) for m in [u] + list(agrupadas) if not incluida_en_total(m))
         return (
-            MARCADO if u["id"] in self.seleccionadas else DESMARCADO,
-            u["piso"], normalizar_tipo(u["tipo"]), ("↳ " if nivel else "") + u["unidad"], u["uf"],
+            normalizar_tipo(u["tipo"]), u["piso"], ("↳ " if nivel else "") + u["unidad"], u["uf"],
             relacion, u["dueno"], u["inquilino"],
             format_currency_ar(importe), self._estado_fila(u, agrupadas, estados),
+            MARCADO if u["id"] in self.seleccionadas else DESMARCADO,
         )
 
     @staticmethod
@@ -1793,13 +1773,6 @@ class App(tk.Tk):
     def _recargar_unidades(self):
         self._cargar_unidades(mantener_seleccion=True)
 
-    def _nueva_unidad(self):
-        edificio = self.var_edificio.get()
-        if not edificio:
-            messagebox.showwarning("Atención", "Primero creá un edificio desde Administrar → Administrar edificios/unidades.")
-            return
-        DialogoUnidad(self, edificio, unidad=None, on_guardar=self._recargar_unidades)
-
     # -----------------------------------------------------------------
     # Selección de filas
     # -----------------------------------------------------------------
@@ -1812,7 +1785,7 @@ class App(tk.Tk):
         fila = self.tree.identify_row(event.y)
         if not fila:
             return
-        if columna == "#1":  # columna de selección
+        if columna == self._col_sel:  # columna de selección
             self._alternar_seleccion(fila)
 
     def _doble_click_en_tabla(self, event):
@@ -1820,7 +1793,7 @@ class App(tk.Tk):
         columna = self.tree.identify_column(event.x)
         if not fila:
             return
-        if columna == "#1":
+        if columna == self._col_sel:
             return  # ya se maneja como clic simple
         unidad = self._unidades_por_iid.get(fila)
         if unidad:
@@ -1829,7 +1802,7 @@ class App(tk.Tk):
     def _marcar(self, iid, marcar):
         (self.seleccionadas.add if marcar else self.seleccionadas.discard)(iid)
         valores = list(self.tree.item(iid, "values"))
-        valores[0] = MARCADO if marcar else DESMARCADO
+        valores[-1] = MARCADO if marcar else DESMARCADO
         self.tree.item(iid, values=valores)
 
     def _alternar_seleccion(self, iid):
@@ -1842,14 +1815,14 @@ class App(tk.Tk):
         for iid in self.tree.get_children():
             self.seleccionadas.add(iid)
             valores = list(self.tree.item(iid, "values"))
-            valores[0] = MARCADO
+            valores[-1] = MARCADO
             self.tree.item(iid, values=valores)
 
     def _quitar_todas(self):
         self.seleccionadas.clear()
         for iid in self.tree.get_children():
             valores = list(self.tree.item(iid, "values"))
-            valores[0] = DESMARCADO
+            valores[-1] = DESMARCADO
             self.tree.item(iid, values=valores)
 
     # -----------------------------------------------------------------
@@ -2074,7 +2047,7 @@ class App(tk.Tk):
 
             self._recargar_unidades()      # los círculos de "recibo emitido" pasan a verde
 
-            if generados and self.var_mostrar_lista.get():
+            if generados:
                 VentanaRecibosGenerados(self, generados, len(plan), errores)
                 return
 
