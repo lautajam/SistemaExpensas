@@ -59,8 +59,14 @@ echo Compilando SistemaExpensas.exe ...
 echo (esto puede tardar uno o dos minutos)
 echo.
 
+REM --collect-submodules=reportlab.graphics.barcode: ese paquete de reportlab
+REM importa sus submodulos (code128, etc.) de forma dinamica, y PyInstaller no
+REM los detecta solo. Sin esto, el .exe funciona en la PC donde se compilo
+REM (reportlab esta instalado ahi) pero falla en cualquier otra con
+REM "ModuleNotFoundError: No module named 'reportlab.graphics.barcode.code128'".
 python -m PyInstaller --noconfirm --onefile --windowed ^
     --name "SistemaExpensas" ^
+    --collect-submodules=reportlab.graphics.barcode ^
     main.py
 
 if errorlevel 1 (
