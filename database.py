@@ -20,6 +20,7 @@ import zipfile
 from datetime import datetime
 
 import config
+import correo
 import pagos
 from unidades import (DEPTO, MODO_TOTAL, TIPOS_ASOCIABLES, etiqueta_unidad, indice_por_id, normalizar_modo,
                       normalizar_tipo)
@@ -111,7 +112,7 @@ EDIFICIOS_CAMPOS = ["id", "nombre", "direccion", "localidad", "cuit",
 NUMERACION_CAMPOS = ["edificio", "ultimo_recibo"]
 HISTORIAL_CAMPOS = [
     "numero_recibo", "edificio", "fecha", "expensas_de", "gastos_de",
-    "piso", "tipo", "unidad", "inquilino", "importe", "archivo",
+    "piso", "tipo", "unidad", "inquilino", "importe", "archivo", "unidad_id",
 ]
 INMOBILIARIA_CAMPOS = ["nombre", "subtitulo", "direccion", "telefono", "email"]
 
@@ -618,6 +619,7 @@ def delete_unidad(unidad_id):
     restantes = [u for u in get_all_unidades() if u["id"] not in ids]
     _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, restantes)
     _sincronizar_pagos_seguro(borradas[0]["edificio"])
+    correo.borrar_emails_unidades(ids)
     return borradas
 
 
@@ -665,7 +667,12 @@ def append_historial(registro):
 
 
 def get_historial():
-    return _read_csv(config.HISTORIAL_CSV)
+    filas = _read_csv(config.HISTORIAL_CSV)
+    for r in filas:
+        for campo in HISTORIAL_CAMPOS:
+            if r.get(campo) is None:
+                r[campo] = ""
+    return filas
 
 
 # ---------------------------------------------------------------------------

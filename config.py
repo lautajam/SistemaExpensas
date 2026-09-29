@@ -49,6 +49,11 @@ PREFERENCIAS_CSV = os.path.join(CONFIG_DIR, "preferencias.csv")
 # Contraseña maestra (hasheada) que protege las pantallas de administración
 MAESTRO_CSV = os.path.join(CONFIG_DIR, "maestro.csv")
 
+# Envío de recibos por mail (ver correo.py)
+EMAILS_UNIDADES_CSV = os.path.join(DATOS_DIR, "emails_unidades.csv")
+SMTP_CSV = os.path.join(CONFIG_DIR, "smtp.csv")
+MAILS_ENVIADOS_CSV = os.path.join(DATOS_DIR, "mails_enviados.csv")
+
 # Imágenes de la inmobiliaria (se guardan siempre como PNG en configuracion/)
 IMAGENES_INMOBILIARIA = {
     "logo": os.path.join(CONFIG_DIR, "logo.png"),

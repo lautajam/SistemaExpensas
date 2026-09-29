@@ -48,6 +48,9 @@ editables.
   edificios dados de baja.
 - Contraseña maestra (hasheada, con pregunta de seguridad) que protege la
   administración de edificios, unidades, la inmobiliaria y los datos.
+- Envío de recibos por mail (con el PDF adjunto) al inquilino y al dueño de
+  cada unidad, desde el historial o justo después de generarlos, con registro
+  de qué se mandó.
 
 ## 2. Requisitos
 
@@ -120,6 +123,7 @@ SistemaExpensas/
 ├── recibo.py               Datos del recibo: formatos, importe en letras, ajuste de textos
 ├── pdf_generator.py        Generación del PDF desde la plantilla
 ├── maestro.py               Contraseña maestra (hasheada) de las pantallas de administración
+├── correo.py                Envío de recibos por mail: direcciones, SMTP y registro de envíos
 ├── ui.py                   Interfaz gráfica (Tkinter)
 ├── requirements.txt
 ├── construir_exe.bat
@@ -159,6 +163,9 @@ temporales ni ocultas del sistema. Para un ejecutable en
 | `configuracion/preferencias.csv` | Preferencias de la interfaz |
 | `configuracion/logo.png`, `firma.png` | Imágenes de la inmobiliaria |
 | `configuracion/maestro.csv` | Contraseña maestra hasheada y pregunta de seguridad |
+| `datos/emails_unidades.csv` | Direcciones de mail de cada unidad |
+| `configuracion/smtp.csv` | Configuración SMTP para enviar los recibos por mail |
+| `datos/mails_enviados.csv` | Registro de los mails enviados |
 | `edificios/<Edificio>/` | PDF de los recibos |
 
 Los CSV se guardan en UTF-8 con BOM, de modo que Excel muestra correctamente
@@ -354,11 +361,12 @@ la planilla de pagos; los recibos ya generados y el historial no se modifican.
 
 ### Contraseña maestra
 
-**Administrar edificios/unidades**, **Configuración de la inmobiliaria** y el
-**Editor de datos (CSV)** están protegidos por una contraseña maestra: la piden
-para abrir cualquiera de las tres pantallas, y la vuelven a pedir en cada alta,
-edición o borrado dentro de ellas. El resto de la aplicación (pantalla
-principal, generar recibos, historial) queda libre.
+**Administrar edificios/unidades**, **Configuración de la inmobiliaria**,
+**Mails** y el **Editor de datos (CSV)** están protegidos por una contraseña
+maestra: la piden para abrir cualquiera de las cuatro pantallas, y la vuelven
+a pedir en cada alta, edición o borrado dentro de ellas. El resto de la
+aplicación (pantalla principal, generar recibos, historial y el botón
+**Enviar por mail**) queda libre.
 
 - **Primera vez:** al abrir cualquiera de esas pantallas sin tener todavía una
   contraseña creada, la aplicación obliga a crear una (con confirmación) junto
@@ -442,13 +450,46 @@ programa y su edición manual podría duplicar o saltear números de recibo. Si
 es necesario corregirlo, debe hacerse directamente en `datos/numeracion.csv`,
 con el programa cerrado.
 
+### Envío de recibos por mail
+
+**Administrar → Mails** guarda, por edificio, hasta 4 direcciones por unidad
+(2 del inquilino y 2 del dueño), en una lista con todas las unidades del
+edificio elegido. Una cochera o baulera **incluida en el total** de su
+departamento no aparece: nunca genera su propio recibo, así que no necesita
+direcciones propias. Un depto que **paga junto** con su cochera o baulera usa
+únicamente los mails cargados para el depto.
+
+El botón **Configuración SMTP** abre lo mínimo necesario para poder mandar los
+mails: servidor, puerto, usuario, contraseña y el tipo de seguridad de la
+conexión (STARTTLS, SSL o ninguna), con un botón **Probar conexión**. No hay
+nombre ni dirección de remitente aparte: el mail se manda "de" el propio
+usuario SMTP, que es también la dirección que figura como remitente (así lo
+exigen la gran mayoría de los servidores, Gmail incluido). La contraseña se
+guarda tal cual (no hasheada, como la maestra): hace falta poder usarla para
+conectarse al servidor; el acceso a esta pantalla ya está protegido por la
+contraseña maestra.
+
+Con las direcciones y la configuración SMTP cargadas, tanto la ventana que aparece al
+generar recibos como **Ver → Historial de recibos** tienen una columna de
+tilde (con **Seleccionar todas** / **Quitar todas**) y un botón **Enviar por
+mail**: manda el PDF adjunto a cada dirección cargada de la unidad de cada
+recibo tildado. Al terminar, muestra cuántos se mandaron y el detalle de los
+que fallaron (por ejemplo, una unidad sin ninguna dirección cargada, o un
+recibo de antes de tener esta función, que no queda vinculado a una unidad).
+Queda un registro de cada envío en `datos/mails_enviados.csv`.
+
+El asunto y el cuerpo del mail son fijos por ahora: «Recibo expensas
+`<Edificio>` - `<Expensas de>`» y un texto que menciona la unidad, el edificio
+y los mismos «Expensas de» / «Gastos de» que figuran en el recibo.
+
 ### Historial
 
 **Ver → Historial de recibos** lista todos los recibos generados, con filtro
 por edificio. Permite **Abrir PDF** (o doble clic), que utiliza el visor de PDF
 predeterminado de Windows, y **Mostrar en carpeta**, que abre el Explorador con
 el archivo seleccionado. Si el archivo no puede abrirse (por ejemplo, porque
-se movió o borró), se muestra su ruta completa.
+se movió o borró), se muestra su ruta completa. También permite **enviar
+recibos por mail** (ver más arriba).
 
 ### Copia de seguridad
 
@@ -588,8 +629,11 @@ espaciados. No hace falta recompilar: basta con generar un recibo de prueba.
 | `edificios.csv` | `id`, `nombre`, `direccion`, `localidad`, `cuit`, `admin_nombre`, `admin_cuit`, `admin_rpac` |
 | `unidades.csv` | `id`, `edificio`, `piso`, `tipo`, `unidad`, `uf`, `inquilino`, `dueno`, `importe`, `depto_id`, `paga_junto`, `celda` |
 | `numeracion.csv` | `edificio`, `ultimo_recibo` |
-| `historial.csv` | `numero_recibo`, `edificio`, `fecha`, `expensas_de`, `gastos_de`, `piso`, `tipo`, `unidad`, `inquilino`, `importe`, `archivo` |
+| `historial.csv` | `numero_recibo`, `edificio`, `fecha`, `expensas_de`, `gastos_de`, `piso`, `tipo`, `unidad`, `inquilino`, `importe`, `archivo`, `unidad_id` |
 | `inmobiliaria.csv` | `nombre`, `subtitulo`, `direccion`, `telefono`, `email` |
+| `emails_unidades.csv` | `unidad_id`, `inquilino1`, `inquilino2`, `dueno1`, `dueno2` |
+| `smtp.csv` | `servidor`, `puerto`, `usuario`, `password`, `tls` |
+| `mails_enviados.csv` | `fecha`, `edificio`, `numero_recibo`, `unidad`, `destinatario`, `resultado`, `detalle` |
 
 Detalles de `unidades.csv`:
 
@@ -599,6 +643,11 @@ Detalles de `unidades.csv`:
 - `paga_junto`: vacío (recibo aparte), `1` (paga junto) o `T` (incluida en el
   total del departamento). Solo aplica a cocheras y bauleras con departamento.
 - `celda`: celda de la planilla propia (ej. `B12`); vacía en modo automático.
+
+`historial.csv` guarda además `unidad_id` (el `id` de la unidad, o del
+departamento si el recibo es de un grupo que paga junto), para poder mandarlo
+por mail más adelante sin tener que volver a identificar la unidad. Los
+recibos generados antes de esta función tienen ese campo vacío.
 
 Los importes admiten los formatos `45000`, `45000,50`, `45.000,50`, `$45.000` y
 `$ 45.000,50`.

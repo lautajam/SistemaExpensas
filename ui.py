@@ -23,6 +23,7 @@ from datetime import date
 from tkinter import ttk, messagebox, filedialog
 
 import config
+import correo
 import database
 import maestro
 from utils import (
@@ -1635,6 +1636,203 @@ class VentanaConfiguracion(tk.Toplevel):
 
 
 # ===========================================================================
+# Ventana: direcciones de mail de cada unidad y configuración SMTP
+# ===========================================================================
+
+class DialogoConfiguracionSMTP(tk.Toplevel):
+    """Lo mínimo para poder mandar los recibos por mail: servidor, puerto, usuario y contraseña."""
+
+    def __init__(self, parent, on_guardado=None):
+        super().__init__(parent)
+        self.on_guardado = on_guardado
+        self.title("Configuración SMTP")
+        self.configure(bg=COLOR_FONDO)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        datos = correo.get_smtp()
+        cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
+        cont.pack(fill="both", expand=True)
+
+        self.vars = {}
+        campos = [
+            ("servidor", "Servidor SMTP:", False),
+            ("puerto", "Puerto:", False),
+            ("usuario", "Usuario (mail):", False),
+            ("password", "Contraseña:", True),
+        ]
+        for i, (clave, etiqueta, oculto) in enumerate(campos):
+            tk.Label(cont, text=etiqueta, font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(row=i, column=0, sticky="w", pady=4)
+            var = tk.StringVar(value=datos.get(clave, ""))
+            tk.Entry(cont, textvariable=var, width=32, font=FUENTE_NORMAL,
+                     show="*" if oculto else "").grid(row=i, column=1, pady=4, padx=(10, 0))
+            self.vars[clave] = var
+
+        tk.Label(cont, text="El usuario es también la dirección que figura como remitente\n"
+                 "(en Gmail, por ejemplo, usá una contraseña de aplicación).",
+                 font=("Segoe UI", 8), fg="#666666", bg=COLOR_FONDO, justify="left").grid(
+            row=len(campos), column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        tk.Label(cont, text="Seguridad de la conexión:", font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(
+            row=len(campos) + 1, column=0, sticky="w", pady=4)
+        self.var_tls = tk.StringVar(value=datos.get("tls") or "STARTTLS")
+        ttk.Combobox(cont, textvariable=self.var_tls, state="readonly", width=29, font=FUENTE_NORMAL,
+                     values=["STARTTLS", "SSL", "Ninguna"]).grid(row=len(campos) + 1, column=1, pady=4, padx=(10, 0))
+
+        self.lbl_estado = tk.Label(cont, text="", font=("Segoe UI", 8), bg=COLOR_FONDO, wraplength=340, justify="left")
+        self.lbl_estado.grid(row=len(campos) + 2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+        botones = tk.Frame(cont, bg=COLOR_FONDO)
+        botones.grid(row=len(campos) + 3, column=0, columnspan=2, pady=(14, 0))
+        tk.Button(botones, text="Probar conexión", command=self._probar, padx=12, pady=4).pack(side="left", padx=6)
+        tk.Button(botones, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
+                  fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
+        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+
+    def _leer(self):
+        return {clave: var.get().strip() for clave, var in self.vars.items()} | {"tls": self.var_tls.get()}
+
+    def _probar(self):
+        datos = self._leer()
+        if not datos["puerto"].isdigit():
+            self.lbl_estado.config(text="El puerto tiene que ser un número.", fg="#b3261e")
+            return
+        self.lbl_estado.config(text="Probando...", fg="#666666")
+        self.update_idletasks()
+        ok, mensaje = correo.probar_conexion(datos)
+        self.lbl_estado.config(text=mensaje, fg="#1f7a3d" if ok else "#b3261e")
+
+    def _guardar(self):
+        def guardar_de_verdad():
+            try:
+                correo.guardar_smtp(self._leer())
+            except ValueError as e:
+                messagebox.showwarning("Datos incompletos", str(e), parent=self)
+                return
+            self.destroy()
+            if self.on_guardado:
+                self.on_guardado()
+
+        requerir_maestro(self, guardar_de_verdad)
+
+
+class VentanaMails(tk.Toplevel):
+    """Direcciones de mail (inquilino y dueño) de cada unidad de un edificio, para enviar recibos."""
+
+    def __init__(self, parent, edificio_inicial=""):
+        super().__init__(parent)
+        self.title("Mails")
+        self.configure(bg=COLOR_FONDO)
+        self.geometry("840x560")
+        self.transient(parent)
+        self.grab_set()
+
+        top = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=10)
+        top.pack(fill="x")
+        tk.Label(top, text="Edificio:", font=FUENTE_BOLD, bg=COLOR_FONDO).pack(side="left")
+        self.var_edificio = tk.StringVar(value=edificio_inicial)
+        self.combo_edificio = ttk.Combobox(
+            top, textvariable=self.var_edificio, values=database.get_nombres_edificios(),
+            state="readonly", width=28)
+        self.combo_edificio.pack(side="left", padx=8)
+        self.combo_edificio.bind("<<ComboboxSelected>>", lambda e: self._cargar())
+        tk.Button(top, text="Configuración SMTP", command=self._config_smtp).pack(side="right")
+
+        tk.Label(
+            self, bg=COLOR_FONDO, fg="#666666", font=("Segoe UI", 8), justify="left", wraplength=720,
+            text="Hasta 2 mails del inquilino y 2 del dueño por unidad. Al enviar un recibo se manda a todos "
+                 "los que estén cargados. Un depto que paga junto con su cochera/baulera usa los mails del depto.",
+        ).pack(anchor="w", padx=16, pady=(0, 6))
+
+        botones_masivos = tk.Frame(self, bg=COLOR_FONDO, padx=16)
+        botones_masivos.pack(fill="x")
+        tk.Button(botones_masivos, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
+                  fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left")
+        tk.Button(botones_masivos, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+
+        zona = tk.Frame(self, bg=COLOR_FONDO)
+        zona.pack(fill="both", expand=True, padx=16, pady=(10, 16))
+        canvas = tk.Canvas(zona, bg=COLOR_FONDO, highlightthickness=0)
+        barra = ttk.Scrollbar(zona, orient="vertical", command=canvas.yview)
+        self._interior = tk.Frame(canvas, bg=COLOR_FONDO)
+        self._interior.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=self._interior, anchor="nw")
+        canvas.configure(yscrollcommand=barra.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        barra.pack(side="right", fill="y")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all(
+            "<MouseWheel>", lambda ev: canvas.yview_scroll(-1 * (ev.delta // 120), "units")))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        self.vars = {}     # unidad_id -> {inquilino1, inquilino2, dueno1, dueno2}: StringVar
+        self._cargar()
+
+    def _config_smtp(self):
+        DialogoConfiguracionSMTP(self)
+
+    def _cargar(self):
+        for w in self._interior.winfo_children():
+            w.destroy()
+        self.vars = {}
+
+        edificio = self.var_edificio.get()
+        if not edificio:
+            return
+        todas = database.get_unidades_por_edificio(edificio)
+        por_id = indice_por_id(todas)
+        guardados = correo.get_emails_unidades()
+
+        titulos = ["Unidad", "Inquilino 1", "Inquilino 2", "Dueño 1", "Dueño 2"]
+        for c, texto in enumerate(titulos):
+            tk.Label(self._interior, text=texto, font=FUENTE_BOLD, bg=COLOR_FONDO).grid(
+                row=0, column=c, sticky="w", padx=(0 if c == 0 else 6, 0), pady=(0, 6))
+
+        fila = 1
+        for u, nivel in ordenar_con_asociadas(todas):
+            if nivel == 1 and incluida_en_total(u):
+                continue    # nunca genera su propio recibo: no hace falta cargarle mails
+            texto = ("      " if nivel else "") + f"{nombre_tipo(normalizar_tipo(u['tipo']))} — {etiqueta_unidad(u, por_id)}"
+            tk.Label(self._interior, text=texto, font=FUENTE_NORMAL, bg=COLOR_FONDO, anchor="w", width=34).grid(
+                row=fila, column=0, sticky="w", pady=2)
+            existentes = guardados.get(u["id"], {})
+            variables = {}
+            for c, campo in enumerate(correo.EMAILS_CAMPOS[1:], start=1):
+                var = tk.StringVar(value=existentes.get(campo, ""))
+                tk.Entry(self._interior, textvariable=var, width=20, font=FUENTE_NORMAL).grid(
+                    row=fila, column=c, padx=(6, 0), pady=2)
+                variables[campo] = var
+            self.vars[u["id"]] = variables
+            fila += 1
+
+        if not todas:
+            tk.Label(self._interior, text="Este edificio todavía no tiene unidades.", bg=COLOR_FONDO,
+                     font=FUENTE_NORMAL).grid(row=1, column=0, pady=10)
+
+    def _guardar(self):
+        invalidas = []
+        datos_por_unidad = {}
+        for unidad_id, variables in self.vars.items():
+            valores = {campo: var.get().strip() for campo, var in variables.items()}
+            for campo, valor in valores.items():
+                if valor and not correo.es_email_valido(valor):
+                    invalidas.append(valor)
+            datos_por_unidad[unidad_id] = valores
+        if invalidas:
+            messagebox.showwarning(
+                "Mails inválidos",
+                "Estos mails no tienen un formato válido:\n\n" + "\n".join(invalidas[:10]), parent=self)
+            return
+
+        def guardar_de_verdad():
+            correo.set_emails_unidades(datos_por_unidad)
+            messagebox.showinfo("Mails", "Las direcciones se guardaron correctamente.", parent=self)
+            self.destroy()
+
+        requerir_maestro(self, guardar_de_verdad)
+
+
+# ===========================================================================
 # Ventana: historial de recibos
 # ===========================================================================
 
@@ -1668,12 +1866,81 @@ class _AbreRecibosMixin:
             messagebox.showinfo("Ubicación del archivo", ruta)
 
 
-class VentanaHistorial(_AbreRecibosMixin, tk.Toplevel):
+class _EnviarPorMailMixin:
+    """
+    Tilde de selección (columna "sel", primera) + Seleccionar todas/Quitar todas +
+    "Enviar por mail" para una lista de filas del historial. Necesita self.tree,
+    self._col_sel (id de columna que da identify_column, ej. "#1") y
+    self._filas_por_iid (iid -> fila del historial, tal como la devuelve
+    database.get_historial()/se guarda con append_historial).
+    """
+
+    def _click_en_tabla_mail(self, event):
+        region = self.tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        if self.tree.identify_column(event.x) == self._col_sel:
+            self._alternar_seleccion_mail(self.tree.identify_row(event.y))
+
+    def _marcar_mail(self, iid, marcar):
+        (self.seleccionadas.add if marcar else self.seleccionadas.discard)(iid)
+        valores = list(self.tree.item(iid, "values"))
+        valores[0] = MARCADO if marcar else DESMARCADO
+        self.tree.item(iid, values=valores)
+
+    def _alternar_seleccion_mail(self, iid):
+        if not iid:
+            return
+        self._marcar_mail(iid, iid not in self.seleccionadas)
+
+    def _seleccionar_todas_mail(self):
+        for iid in self.tree.get_children():
+            self._marcar_mail(iid, True)
+
+    def _quitar_todas_mail(self):
+        for iid in self.tree.get_children():
+            self._marcar_mail(iid, False)
+
+    def _enviar_por_mail(self):
+        elegidas = [iid for iid in self.tree.get_children() if iid in self.seleccionadas]
+        if not elegidas:
+            messagebox.showinfo("Enviar por mail", "Tildá primero los recibos que querés mandar.", parent=self)
+            return
+        if not correo.existe_smtp():
+            messagebox.showwarning(
+                "Enviar por mail",
+                "Todavía no cargaste la configuración SMTP (Administrar → Mails → Configuración SMTP).",
+                parent=self)
+            return
+
+        detalle, enviados, fallidos = [], 0, 0
+        for iid in elegidas:
+            fila = self._filas_por_iid[iid]
+            resultados = correo.enviar_recibo(fila)
+            etiqueta = f"{fila.get('piso', '')} {fila.get('unidad', '')}".strip()
+            for destinatario, ok, error in resultados:
+                if ok:
+                    enviados += 1
+                else:
+                    fallidos += 1
+                    detalle.append(f"{etiqueta} → {destinatario}: {error}")
+
+        mensaje = f"Se enviaron {enviados} mail(s)."
+        if fallidos:
+            mensaje += f"\n\n{fallidos} con error:\n" + "\n".join(detalle[:15])
+            if len(detalle) > 15:
+                mensaje += f"\n… y {len(detalle) - 15} más."
+            messagebox.showwarning("Enviar por mail", mensaje, parent=self)
+        else:
+            messagebox.showinfo("Enviar por mail", mensaje, parent=self)
+
+
+class VentanaHistorial(_AbreRecibosMixin, _EnviarPorMailMixin, tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Historial de recibos generados")
         self.configure(bg=COLOR_FONDO)
-        self.geometry("900x480")
+        self.geometry("980x480")
         self.transient(parent)
 
         top = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=10)
@@ -1689,23 +1956,25 @@ class VentanaHistorial(_AbreRecibosMixin, tk.Toplevel):
         combo.pack(side="left", padx=8)
         combo.bind("<<ComboboxSelected>>", lambda e: self._recargar())
 
-        columnas = ("numero_recibo", "edificio", "fecha", "expensas_de", "tipo", "piso", "unidad", "inquilino", "importe", "archivo")
+        columnas = ("sel", "numero_recibo", "edificio", "fecha", "expensas_de", "tipo", "piso", "unidad", "inquilino", "importe", "archivo")
         titulos = {
-            "numero_recibo": "N°", "edificio": "Edificio", "fecha": "Fecha", "expensas_de": "Expensas de",
+            "sel": "", "numero_recibo": "N°", "edificio": "Edificio", "fecha": "Fecha", "expensas_de": "Expensas de",
             "tipo": "Tipo", "piso": "Piso", "unidad": "Unidad", "inquilino": "Inquilino", "importe": "Importe",
             "archivo": "Archivo",
         }
         anchos = {
-            "numero_recibo": 60, "edificio": 150, "fecha": 80, "expensas_de": 110,
+            "sel": 30, "numero_recibo": 60, "edificio": 150, "fecha": 80, "expensas_de": 110,
             "tipo": 80, "piso": 55, "unidad": 55, "inquilino": 150, "importe": 90, "archivo": 260,
         }
 
         self.tree = ttk.Treeview(self, columns=columnas, show="headings", height=16)
         for c in columnas:
             self.tree.heading(c, text=titulos[c])
-            self.tree.column(c, width=anchos[c], anchor="w")
+            self.tree.column(c, width=anchos[c], anchor="center" if c == "sel" else "w")
         self.tree.pack(fill="both", expand=True, padx=16, pady=(4, 8))
         self.tree.bind("<Double-1>", lambda e: self._abrir_pdf_seleccionado())
+        self.tree.bind("<Button-1>", self._click_en_tabla_mail)
+        self._col_sel = "#1"
 
         pie = tk.Frame(self, bg=COLOR_FONDO, padx=16)
         pie.pack(fill="x", pady=(0, 12))
@@ -1713,16 +1982,22 @@ class VentanaHistorial(_AbreRecibosMixin, tk.Toplevel):
                   bg=COLOR_PRIMARIO, fg="white", font=FUENTE_BOLD, padx=12, pady=4).pack(side="left")
         tk.Button(pie, text="Mostrar en carpeta", command=self._mostrar_en_carpeta,
                   padx=12, pady=4).pack(side="left", padx=8)
-        tk.Label(pie, text="(doble clic en una fila también abre el PDF)", bg=COLOR_FONDO,
-                 fg="#666666", font=("Segoe UI", 8)).pack(side="left", padx=10)
+        tk.Button(pie, text="Seleccionar todas", command=self._seleccionar_todas_mail).pack(side="left", padx=(16, 0))
+        tk.Button(pie, text="Quitar todas", command=self._quitar_todas_mail).pack(side="left", padx=6)
+        tk.Button(pie, text="Enviar por mail", command=self._enviar_por_mail,
+                  bg="#1f7a3d", fg="white", font=FUENTE_BOLD, padx=12, pady=4).pack(side="left", padx=6)
 
         self._archivo_por_iid = {}
+        self._filas_por_iid = {}
+        self.seleccionadas = set()
         self._recargar()
 
     def _recargar(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
         self._archivo_por_iid = {}
+        self._filas_por_iid = {}
+        self.seleccionadas = set()
 
         filtro = self.var_filtro.get()
         historial = database.get_historial()
@@ -1736,18 +2011,19 @@ class VentanaHistorial(_AbreRecibosMixin, tk.Toplevel):
             iid = str(contador)
             contador += 1
             self.tree.insert("", "end", iid=iid, values=(
-                r.get("numero_recibo", ""), r.get("edificio", ""), r.get("fecha", ""),
+                DESMARCADO, r.get("numero_recibo", ""), r.get("edificio", ""), r.get("fecha", ""),
                 r.get("expensas_de", ""), r.get("tipo", ""), r.get("piso", ""), r.get("unidad", ""),
                 r.get("inquilino", ""), importe_fmt, r.get("archivo", ""),
             ))
             self._archivo_por_iid[iid] = r.get("archivo", "")
+            self._filas_por_iid[iid] = r
 
 
 # ===========================================================================
 # Ventana: recibos recién generados
 # ===========================================================================
 
-class VentanaRecibosGenerados(_AbreRecibosMixin, tk.Toplevel):
+class VentanaRecibosGenerados(_AbreRecibosMixin, _EnviarPorMailMixin, tk.Toplevel):
     """Lista de los PDF que se acaban de generar, para abrirlos desde ahí."""
 
     def __init__(self, parent, generados, total, errores=()):
@@ -1755,7 +2031,7 @@ class VentanaRecibosGenerados(_AbreRecibosMixin, tk.Toplevel):
         super().__init__(parent)
         self.title("Recibos generados")
         self.configure(bg=COLOR_FONDO)
-        self.geometry("880x460")
+        self.geometry("920x460")
         self.transient(parent)
 
         tk.Label(
@@ -1763,31 +2039,36 @@ class VentanaRecibosGenerados(_AbreRecibosMixin, tk.Toplevel):
             bg=COLOR_FONDO, anchor="w",
         ).pack(fill="x", padx=16, pady=(12, 4))
 
-        columnas = ("numero_recibo", "tipo", "unidad", "inquilino", "importe", "gastos_de", "archivo")
-        titulos = {"numero_recibo": "N°", "tipo": "Tipo", "unidad": "Unidad", "inquilino": "Inquilino",
+        columnas = ("sel", "numero_recibo", "tipo", "unidad", "inquilino", "importe", "gastos_de", "archivo")
+        titulos = {"sel": "", "numero_recibo": "N°", "tipo": "Tipo", "unidad": "Unidad", "inquilino": "Inquilino",
                    "importe": "Importe", "gastos_de": "Gastos de", "archivo": "Archivo"}
-        anchos = {"numero_recibo": 60, "tipo": 80, "unidad": 150, "inquilino": 130,
+        anchos = {"sel": 30, "numero_recibo": 60, "tipo": 80, "unidad": 150, "inquilino": 130,
                   "importe": 90, "gastos_de": 110, "archivo": 250}
         self.tree = ttk.Treeview(self, columns=columnas, show="headings", height=12)
         for c in columnas:
             self.tree.heading(c, text=titulos[c])
-            self.tree.column(c, width=anchos[c], anchor="w")
+            self.tree.column(c, width=anchos[c], anchor="center" if c == "sel" else "w")
         self.tree.pack(fill="both", expand=True, padx=16, pady=(4, 8))
         self.tree.bind("<Double-1>", lambda e: self._abrir_pdf_seleccionado())
+        self.tree.bind("<Button-1>", self._click_en_tabla_mail)
+        self._col_sel = "#1"
 
         self._archivo_por_iid = {}
+        self._filas_por_iid = {}
+        self.seleccionadas = set()
         for i, (r, etiqueta) in enumerate(generados):
             iid = str(i)
             self.tree.insert("", "end", iid=iid, values=(
-                r["numero_recibo"], r["tipo"], etiqueta, r["inquilino"],
+                DESMARCADO, r["numero_recibo"], r["tipo"], etiqueta, r["inquilino"],
                 format_currency_ar(parse_importe(r["importe"])), r["gastos_de"], r["archivo"],
             ))
             self._archivo_por_iid[iid] = r["archivo"]
+            self._filas_por_iid[iid] = r
 
         if errores:
             tk.Label(
                 self, text="Unidades con error:\n" + "\n".join(errores), fg="#b3261e", bg=COLOR_FONDO,
-                justify="left", anchor="w", wraplength=820,
+                justify="left", anchor="w", wraplength=880,
             ).pack(fill="x", padx=16, pady=(0, 6))
 
         pie = tk.Frame(self, bg=COLOR_FONDO, padx=16)
@@ -1796,6 +2077,10 @@ class VentanaRecibosGenerados(_AbreRecibosMixin, tk.Toplevel):
                   bg=COLOR_PRIMARIO, fg="white", font=FUENTE_BOLD, padx=12, pady=4).pack(side="left")
         tk.Button(pie, text="Mostrar en carpeta", command=self._mostrar_en_carpeta,
                   padx=12, pady=4).pack(side="left", padx=8)
+        tk.Button(pie, text="Seleccionar todas", command=self._seleccionar_todas_mail).pack(side="left", padx=(16, 0))
+        tk.Button(pie, text="Quitar todas", command=self._quitar_todas_mail).pack(side="left", padx=6)
+        tk.Button(pie, text="Enviar por mail", command=self._enviar_por_mail,
+                  bg="#1f7a3d", fg="white", font=FUENTE_BOLD, padx=12, pady=4).pack(side="left", padx=6)
         tk.Button(pie, text="Cerrar", command=self.destroy, padx=12, pady=4).pack(side="right")
         tk.Label(pie, text="(doble clic en una fila abre el PDF)", bg=COLOR_FONDO,
                  fg="#666666", font=("Segoe UI", 8)).pack(side="left", padx=10)
@@ -1844,6 +2129,7 @@ class App(tk.Tk):
         menu_admin = tk.Menu(menubar, tearoff=0)
         menu_admin.add_command(label="Administrar edificios/unidades", command=self._abrir_administracion)
         menu_admin.add_command(label="Configuración de la inmobiliaria", command=self._abrir_configuracion)
+        menu_admin.add_command(label="Mails", command=self._abrir_mails)
         menu_admin.add_separator()
         menu_admin.add_command(label="Editor de datos (CSV)", command=self._abrir_editor_datos)
         menu_admin.add_separator()
@@ -2325,6 +2611,7 @@ class App(tk.Tk):
                         "inquilino": u["inquilino"],
                         "importe": f"{importe_valor:.2f}",
                         "archivo": os.path.relpath(ruta_pdf, config.BASE_DIR),
+                        "unidad_id": u["id"],
                     }
                     database.append_historial(registro)
                     generados.append((registro, etiqueta_unidad(u, por_id) + sufijo))
@@ -2373,6 +2660,9 @@ class App(tk.Tk):
 
     def _abrir_control_maestro(self):
         VentanaControlMaestro(self)
+
+    def _abrir_mails(self):
+        requerir_maestro(self, lambda: VentanaMails(self, self.var_edificio.get() or ""))
 
     def _abrir_historial(self):
         VentanaHistorial(self)
