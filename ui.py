@@ -2088,6 +2088,191 @@ class VentanaRecibosGenerados(_AbreRecibosMixin, _EnviarPorMailMixin, tk.Topleve
 
 
 # ===========================================================================
+# Ventana: ayuda para generar recibos
+# ===========================================================================
+
+class VentanaAyudaRecibos(tk.Toplevel):
+    """Guía de cómo usar el programa para generar los recibos y enviarlos por mail (día a día,
+    no incluye la parte de Administrar). Con ejemplos armados como los verían en pantalla: la
+    tabla de la pantalla principal y la planilla de pagos."""
+
+    # colores de estado, iguales a los de la pantalla principal (App._crear_tabla)
+    _COLOR_ESTADO = {"Total": "#1f7a3d", "A cta.": "#b26a00", "Deuda": "#b3261e", "No pagado": "#666666"}
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Ayuda - Recibo de expensas")
+        self.configure(bg=COLOR_FONDO)
+        self.geometry("760x640")
+        self.minsize(680, 480)
+        self.transient(parent)
+
+        zona = tk.Frame(self, bg=COLOR_FONDO)
+        zona.pack(fill="both", expand=True, padx=16, pady=(16, 8))
+        barra = ttk.Scrollbar(zona, orient="vertical")
+        canvas = tk.Canvas(zona, bg=COLOR_FONDO, highlightthickness=0, yscrollcommand=barra.set)
+        barra.config(command=canvas.yview)
+        canvas.pack(side="left", fill="both", expand=True)
+        barra.pack(side="right", fill="y")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all(
+            "<MouseWheel>", lambda ev: canvas.yview_scroll(-1 * (ev.delta // 120), "units")))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        cont = tk.Frame(canvas, bg=COLOR_FONDO)
+        ventana_id = canvas.create_window((0, 0), window=cont, anchor="nw")
+        cont.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(ventana_id, width=e.width))
+
+        self._armar_contenido(cont)
+
+        tk.Button(self, text="Cerrar", command=self.destroy, padx=14, pady=4).pack(pady=(0, 16))
+
+    # -----------------------------------------------------------------
+    # Helpers de texto
+    # -----------------------------------------------------------------
+
+    @staticmethod
+    def _titulo(cont, texto):
+        tk.Label(cont, text=texto, font=FUENTE_TITULO, fg=COLOR_PRIMARIO, bg=COLOR_FONDO,
+                  anchor="w", justify="left").pack(fill="x", pady=(0, 8))
+
+    @staticmethod
+    def _seccion(cont, texto):
+        tk.Label(cont, text=texto, font=FUENTE_BOLD, fg=COLOR_PRIMARIO, bg=COLOR_FONDO,
+                  anchor="w", justify="left").pack(fill="x", pady=(16, 4))
+
+    @staticmethod
+    def _parrafo(cont, texto):
+        lbl = tk.Label(cont, text=texto, font=FUENTE_NORMAL, bg=COLOR_FONDO,
+                        anchor="w", justify="left", wraplength=680)
+        lbl.pack(fill="x", pady=(0, 2))
+        cont.bind("<Configure>", lambda e, l=lbl: l.configure(wraplength=max(200, e.width - 8)), add="+")
+
+    # -----------------------------------------------------------------
+    # Ejemplos armados con widgets reales (no solo texto)
+    # -----------------------------------------------------------------
+
+    def _ejemplo_pantalla(self, cont):
+        """Una fila como la de la pantalla principal, con datos de ejemplo."""
+        columnas = ("tipo", "piso", "unidad", "uf", "depto", "dueno", "inquilino", "importe", "estado", "sel")
+        titulos = {"sel": "EMITIR", "piso": "PISO", "tipo": "TIPO", "unidad": "LETRA/N°", "uf": "UF",
+                   "depto": "RELACIÓN", "dueno": "DUEÑO", "inquilino": "INQUILINO",
+                   "importe": "IMPORTE", "estado": "PAGO"}
+        anchos = {"sel": 55, "piso": 45, "tipo": 70, "unidad": 60, "uf": 40, "depto": 120,
+                  "dueno": 100, "inquilino": 100, "importe": 90, "estado": 65}
+
+        tree = ttk.Treeview(cont, columns=columnas, show=("tree", "headings"), height=1, selectmode="none")
+        tree.heading("#0", text="EMITIDO")
+        tree.column("#0", width=64, minwidth=64, stretch=False, anchor="center")
+        for c in columnas:
+            tree.heading(c, text=titulos[c])
+            tree.column(c, width=anchos[c], anchor="w" if c in ("dueno", "inquilino") else "center")
+        tree.tag_configure("total", foreground=self._COLOR_ESTADO["Total"])
+
+        self._icono_emitido = App._crear_circulo("#2e9e4f", "#1b6b33")   # referencia viva: si no, Tk lo descarta
+        tree.insert("", "end", text="", image=self._icono_emitido, tags=("total",), values=(
+            "DEPTO", "1°", "A", "12", "con Cochera 6", "Pedro Gómez", "María Ruiz",
+            format_currency_ar(45000), "Total", MARCADO,
+        ))
+        tree.pack(fill="x", pady=(6, 10))
+
+    def _tabla_leyenda(self, cont, filas):
+        """Tabla de dos columnas: nombre de columna -> qué significa."""
+        marco = tk.Frame(cont, bg=COLOR_FONDO)
+        marco.pack(fill="x", pady=(0, 12))
+        for f, (nombre, explicacion) in enumerate(filas):
+            tk.Label(marco, text=nombre, font=FUENTE_BOLD, bg="white", fg=COLOR_PRIMARIO,
+                     relief="solid", bd=1, padx=8, pady=5, anchor="w", justify="left",
+                     width=15, wraplength=110).grid(row=f, column=0, sticky="nsew")
+            tk.Label(marco, text=explicacion, font=FUENTE_NORMAL, bg="white",
+                     relief="solid", bd=1, padx=8, pady=5, anchor="w", justify="left",
+                     wraplength=520).grid(row=f, column=1, sticky="nsew")
+        marco.grid_columnconfigure(1, weight=1)
+
+    def _ejemplo_planilla(self, cont):
+        """La planilla de pagos de un edificio, con una fila de ejemplo por cada estado posible."""
+        encabezados = ("Unidad", "Total a pagar", "Monto deuda", "Monto pagado", "Tipo pago")
+        filas = [
+            ("1° A", "45.000", "0", "45.000", "Total"),
+            ("1° B", "40.000", "5.000", "30.000", "A cta."),
+            ("PB A", "38.000", "38.000", "38.000", "Deuda"),
+            ("2° A", "42.000", "0", "0", "No pagado"),
+        ]
+        marco = tk.Frame(cont, bg=COLOR_FONDO)
+        marco.pack(fill="x", pady=(6, 4))
+        for c, texto in enumerate(encabezados):
+            tk.Label(marco, text=texto, font=FUENTE_BOLD, bg=COLOR_PRIMARIO, fg="white",
+                     relief="solid", bd=1, padx=10, pady=5).grid(row=0, column=c, sticky="nsew")
+        for f, (unidad, total, deuda, pagado, tipo) in enumerate(filas, start=1):
+            valores = (unidad, f"$ {total}", f"$ {deuda}", f"$ {pagado}", tipo)
+            for c, valor in enumerate(valores):
+                tk.Label(marco, text=valor, font=FUENTE_NORMAL, bg="white",
+                         fg=self._COLOR_ESTADO[tipo] if c == 4 else "black",
+                         relief="solid", bd=1, padx=10, pady=4).grid(row=f, column=c, sticky="nsew")
+        for c in range(5):
+            marco.grid_columnconfigure(c, weight=1)
+
+    # -----------------------------------------------------------------
+    # Contenido
+    # -----------------------------------------------------------------
+
+    def _armar_contenido(self, cont):
+        self._titulo(cont, "Recibo de expensas: guía rápida")
+        self._parrafo(cont, "Estos son los pasos para generar los recibos en PDF de un edificio ya "
+                             "cargado, y mandarlos por mail.")
+
+        self._seccion(cont, "1. Elegir el edificio")
+        self._parrafo(cont, "El selector «Edificio», arriba de la pantalla principal, lista los "
+                             "edificios ya cargados. Al elegir uno, la tabla de abajo se llena sola "
+                             "con todas sus unidades.")
+
+        self._seccion(cont, "2. La pantalla principal: un ejemplo")
+        self._parrafo(cont, "Cada fila es una unidad. Esta es una fila de ejemplo: un departamento "
+                             "1° A que ya emitió su recibo, con su cochera incluida en el mismo importe.")
+        self._ejemplo_pantalla(cont)
+        self._tabla_leyenda(cont, [
+            ("EMITIDO", "El círculo de la izquierda de todo: verde si el recibo de esa unidad ya se "
+                        "generó para el período actual, rojo si todavía no."),
+            ("TIPO / PISO /\nLETRA-N° / UF", "Identifican la unidad."),
+            ("RELACIÓN", "En una cochera o baulera de un depto, de qué depto es (de 1° A). En un "
+                         "depto que incluye alguna en su recibo, cuáles (con Cochera 6)."),
+            ("DUEÑO / INQUILINO /\nIMPORTE", "Datos de la unidad y monto del recibo."),
+            ("PAGO", "El estado según la planilla de pagos: Total, A cta., Deuda, No pagado, o Sin "
+                     "celda si esa unidad todavía no tiene asignada una celda en la planilla."),
+            ("EMITIR", "La casilla, al final de todo: para tildar qué unidades generar."),
+        ])
+
+        self._seccion(cont, "3. La planilla de pagos: un ejemplo")
+        self._parrafo(cont, "Cada edificio tiene su propia planilla en Excel («Abrir planilla de "
+                             "pagos»). Se completan, por unidad, Total a pagar, Monto deuda y Monto "
+                             "pagado; el Tipo pago sale solo, según cuánto se pagó:")
+        self._ejemplo_planilla(cont)
+        self._parrafo(cont, "Total: lo pagado cubre el total más la deuda. A cta.: pagó una parte. "
+                             "Deuda: pagó justo la deuda que traía (nada del mes actual). No pagado: "
+                             "no pagó nada. Después de completar la planilla hay que guardarla "
+                             "(Ctrl+G) y cerrarla, para que el programa pueda leerla.")
+
+        self._seccion(cont, "4. Generar los recibos")
+        self._parrafo(cont, "Con el edificio elegido y la planilla ya cargada:\n"
+                             "• Tildar las unidades en la columna EMITIR (o «Seleccionar todas»).\n"
+                             "• «Actualizar montos desde planilla», para traer lo que se cargó en el Excel.\n"
+                             "• «GENERAR RECIBOS PDF». Se genera un PDF por cada unidad tildada.")
+
+        self._seccion(cont, "5. Ver y abrir los recibos generados")
+        self._parrafo(cont, "Al terminar se abre una lista con los recibos recién hechos: «Abrir "
+                             "PDF» (o doble clic) y «Mostrar en carpeta». Cualquier recibo generado "
+                             "antes, de otro día, está en Ver → Historial de recibos.")
+
+        self._seccion(cont, "6. Enviar los recibos por mail")
+        self._parrafo(cont, "Tanto en esa lista como en el Historial, cada fila tiene una casilla en "
+                             "la columna ENVIAR.\n"
+                             "• Tildar los recibos a enviar (o «Seleccionar todas» / «Quitar todas»).\n"
+                             "• «Enviar por mail»: manda cada recibo, en PDF, a las direcciones "
+                             "cargadas para esa unidad. Al terminar muestra cuántos se enviaron y el "
+                             "detalle de los que fallaron.")
+
+
+# ===========================================================================
 # Ventana principal
 # ===========================================================================
 
@@ -2139,6 +2324,8 @@ class App(tk.Tk):
         menubar.add_cascade(label="Ver", menu=menu_ver)
 
         menu_ayuda = tk.Menu(menubar, tearoff=0)
+        menu_ayuda.add_command(label="Recibo expensas", command=self._mostrar_ayuda_recibos)
+        menu_ayuda.add_separator()
         menu_ayuda.add_command(label="Acerca de", command=self._mostrar_acerca_de)
         menubar.add_cascade(label="Ayuda", menu=menu_ayuda)
 
@@ -2671,6 +2858,9 @@ class App(tk.Tk):
             messagebox.showinfo("Copia de seguridad", f"Backup creado correctamente en:\n\n{ruta}")
         except Exception as e:
             manejar_error("No se pudo crear la copia de seguridad", e)
+
+    def _mostrar_ayuda_recibos(self):
+        VentanaAyudaRecibos(self)
 
     def _mostrar_acerca_de(self):
         messagebox.showinfo(
