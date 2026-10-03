@@ -1,8 +1,8 @@
 # Sistema de Expensas
 
 Aplicación de escritorio para Windows que genera los recibos de expensas de
-consorcios administrados. Funciona sin conexión: los datos se guardan en
-archivos CSV editables con Excel, los pagos se toman de una planilla Excel por
+consorcios administrados. Funciona sin conexión: los datos se guardan en una
+base de datos SQLite (un solo archivo, `datos/expensas.db`), los pagos se toman de una planilla Excel por
 edificio y los recibos se emiten en PDF a partir de una plantilla HTML/CSS
 editables.
 
@@ -107,8 +107,7 @@ que `plantilla/` esté junto al `.exe` y ejecutar `SistemaExpensas.exe`. En el
 primer inicio se crean las carpetas `datos/`, `configuracion/` y `edificios/`.
 
 Para no partir de los datos de ejemplo, se pueden borrar esos edificios desde
-**Administrar → Administrar edificios/unidades** (ver sección 10) o reemplazar
-`datos/edificios.csv` y `datos/unidades.csv` antes del primer uso.
+**Administrar → Administrar edificios/unidades** (ver sección 10).
 
 ## 5. Estructura del proyecto
 
@@ -116,7 +115,8 @@ Para no partir de los datos de ejemplo, se pueden borrar esos edificios desde
 SistemaExpensas/
 ├── main.py                 Punto de entrada
 ├── config.py               Rutas (relativas al ejecutable)
-├── database.py             Persistencia en CSV
+├── db.py                   Base de datos SQLite (datos/expensas.db) y migración desde CSV viejos
+├── database.py             Lógica de datos de la aplicación (edificios, unidades, historial, backups)
 ├── unidades.py             Tipos de unidad, etiquetas, orden y modos de pago
 ├── pagos.py                Planillas de pagos (Excel por edificio)
 ├── utils.py                Importes, fechas, nombres de archivo, CUIT
@@ -135,13 +135,10 @@ SistemaExpensas/
 │   └── fonts/              Tipografía Open Sans (licencia OFL)
 │
 ├── datos/                  Se crea al iniciar
-│   ├── edificios.csv
-│   ├── unidades.csv
-│   ├── numeracion.csv
-│   ├── historial.csv
+│   ├── expensas.db         Base de datos: edificios, unidades, historial, configuración, mails
 │   ├── pagos_edificios/    Una planilla Excel por edificio
 │   └── edificios_borrados/ Edificios archivados
-├── configuracion/          Inmobiliaria, preferencias, logo, firma y contraseña maestra
+├── configuracion/          Logo y firma de la inmobiliaria
 ├── edificios/              Una subcarpeta con los PDF de cada edificio
 └── backups/                Copias de seguridad (.zip)
 ```
@@ -154,22 +151,13 @@ temporales ni ocultas del sistema. Para un ejecutable en
 
 | Ruta | Contenido |
 |---|---|
-| `datos/edificios.csv` | Edificios y datos del consorcio |
-| `datos/unidades.csv` | Unidades de todos los edificios |
-| `datos/numeracion.csv` | Último número de recibo por edificio |
-| `datos/historial.csv` | Recibos generados |
+| `datos/expensas.db` | Base de datos: edificios, unidades, numeración, historial, inmobiliaria, preferencias, contraseña maestra, SMTP, mails de las unidades y registro de envíos |
 | `datos/pagos_edificios/<Edificio>_pagos.xlsx` | Planilla de pagos del edificio |
-| `configuracion/inmobiliaria.csv` | Datos de la inmobiliaria |
-| `configuracion/preferencias.csv` | Preferencias de la interfaz |
 | `configuracion/logo.png`, `firma.png` | Imágenes de la inmobiliaria |
-| `configuracion/maestro.csv` | Contraseña maestra hasheada y pregunta de seguridad |
-| `datos/emails_unidades.csv` | Direcciones de mail de cada unidad |
-| `configuracion/smtp.csv` | Configuración SMTP para enviar los recibos por mail |
-| `datos/mails_enviados.csv` | Registro de los mails enviados |
 | `edificios/<Edificio>/` | PDF de los recibos |
 
-Los CSV se guardan en UTF-8 con BOM, de modo que Excel muestra correctamente
-tildes y «ñ». Si un archivo falta o está vacío, se recrea con sus encabezados.
+La base es la única fuente de datos: no hay que editar archivos a mano. Para
+ver o cambiar datos, usar **Administrar** y **Administrar → Editor de datos**.
 
 ## 7. Guía de uso
 
@@ -362,7 +350,7 @@ la planilla de pagos; los recibos ya generados y el historial no se modifican.
 ### Contraseña maestra
 
 **Administrar edificios/unidades**, **Configuración de la inmobiliaria**,
-**Mailing** y el **Editor de datos (CSV)** están protegidos por una contraseña
+**Mailing** y el **Editor de datos** están protegidos por una contraseña
 maestra: la piden para abrir cualquiera de las cuatro pantallas, y la vuelven
 a pedir en cada alta, edición o borrado dentro de ellas. El resto de la
 aplicación (pantalla principal, generar recibos, historial y el botón
@@ -380,13 +368,11 @@ aplicación (pantalla principal, generar recibos, historial y el botón
   de seguridad (pide la contraseña actual).
 - **¿Olvidaste tu contraseña?** En el cuadro que la pide hay un enlace para
   responder la pregunta de seguridad y, si es correcta, elegir una contraseña
-  nueva ahí mismo. Como último recurso, con el programa cerrado, se puede
-  borrar `configuracion/maestro.csv`: la aplicación pide crear una contraseña
-  nueva la próxima vez que se abra una pantalla protegida (se pierde la
-  anterior, no hay otra forma de recuperarla).
+  nueva ahí mismo. Si tampoco se recuerda la respuesta, no hay otra forma de
+  recuperar la contraseña desde el programa.
 - **Cómo se guarda:** hasheada con PBKDF2-SHA256 y sal aleatoria (nunca en
-  texto plano) en `configuracion/maestro.csv`, junto con la pregunta de
-  seguridad (la respuesta también hasheada). Ver `maestro.py`.
+  texto plano) en la tabla `maestro` de la base de datos, junto con la pregunta
+  de seguridad (la respuesta también hasheada). Ver `maestro.py`.
 
 ### Administrar edificios y unidades
 
@@ -439,16 +425,14 @@ a 1200 px si son muy grandes. El **logo** se imprime arriba a la derecha del
 recibo y la **firma** sobre la línea «Firma»; si no hay imagen
 cargada, ese lugar queda en blanco.
 
-### Editor de datos (CSV)
+### Editor de datos
 
-**Administrar → Editor de datos (CSV)** permite ver, agregar, editar y eliminar
+**Administrar → Editor de datos** permite ver, agregar, editar y eliminar
 filas de las tablas de Edificios, Unidades, Inmobiliaria e Historial sin salir
-del programa. Los cambios se guardan de inmediato.
+del programa. Los cambios se guardan de inmediato en la base de datos.
 
-`numeracion.csv` no aparece en el editor a propósito: lo administra el
-programa y su edición manual podría duplicar o saltear números de recibo. Si
-es necesario corregirlo, debe hacerse directamente en `datos/numeracion.csv`,
-con el programa cerrado.
+La numeración de recibos no aparece en el editor a propósito: la administra el
+programa y su edición manual podría duplicar o saltear números de recibo.
 
 ### Envío de recibos por mail
 
@@ -476,7 +460,7 @@ mail**: manda el PDF adjunto a cada dirección cargada de la unidad de cada
 recibo tildado. Al terminar, muestra cuántos se mandaron y el detalle de los
 que fallaron (por ejemplo, una unidad sin ninguna dirección cargada, o un
 recibo de antes de tener esta función, que no queda vinculado a una unidad).
-Queda un registro de cada envío en `datos/mails_enviados.csv`.
+Queda un registro de cada envío en la tabla `mails_enviados` de la base de datos.
 
 El asunto y el cuerpo del mail son fijos por ahora: «Recibo expensas
 `<Edificio>` - `<Expensas de>`» y un texto que menciona la unidad, el edificio
@@ -498,9 +482,8 @@ edificios, unidades, historial, numeración, planillas de pagos Excel, datos de
 la inmobiliaria con logo y firma, direcciones de mail de las unidades, registro
 de mails enviados, edificios archivados, preferencias y la plantilla del recibo.
 
-**No incluye** la contraseña maestra (`configuracion/maestro.csv`), la
-configuración SMTP (`configuracion/smtp.csv`) ni los PDF de los recibos
-(`edificios/`). Los PDF se pueden regenerar desde los datos; las contraseñas
+**No incluye** la contraseña maestra (tabla `maestro`), la configuración SMTP
+(tabla `smtp`) ni los PDF de los recibos (`edificios/`). Los PDF se pueden regenerar desde los datos; las contraseñas
 se vuelven a cargar a mano.
 
 **Archivo → Cargar desde backup...** (pide la contraseña maestra) lista los
@@ -510,20 +493,14 @@ backup reemplazan a los actuales; los que no están en el backup (contraseña
 maestra, SMTP, PDF) no se tocan. Los backups hechos antes de esta versión
 pueden contener la contraseña maestra y el SMTP: conviene borrarlos.
 
-Se recomienda hacer un backup con regularidad y siempre antes de editar los
-CSV a mano.
+Se recomienda hacer un backup con regularidad.
 
 ## 11. Recibos: numeración y nombres de archivo
 
 ### Numeración
 
-Cada edificio tiene su propio contador en `datos/numeracion.csv`:
-
-```csv
-edificio,ultimo_recibo
-Edificio Alsina 123,4
-Edificio Mitre 456,3
-```
+Cada edificio tiene su propio contador en la tabla `numeracion` de la base de
+datos (por ejemplo, el último recibo de «Edificio Alsina 123» es el 4).
 
 El número se incrementa y se guarda **inmediatamente** en cada recibo, sin
 esperar el final del lote, por lo que un cierre o corte de energía no
@@ -640,18 +617,22 @@ espaciados. No hace falta recompilar: basta con generar un recibo de prueba.
 
 ## 13. Modelo de datos
 
-| Archivo | Columnas |
-|---|---|
-| `edificios.csv` | `id`, `nombre`, `direccion`, `localidad`, `cuit`, `admin_nombre`, `admin_cuit`, `admin_rpac` |
-| `unidades.csv` | `id`, `edificio`, `piso`, `tipo`, `unidad`, `uf`, `inquilino`, `dueno`, `importe`, `depto_id`, `paga_junto`, `celda` |
-| `numeracion.csv` | `edificio`, `ultimo_recibo` |
-| `historial.csv` | `numero_recibo`, `edificio`, `fecha`, `expensas_de`, `gastos_de`, `piso`, `tipo`, `unidad`, `inquilino`, `importe`, `archivo`, `unidad_id` |
-| `inmobiliaria.csv` | `nombre`, `subtitulo`, `direccion`, `telefono`, `email` |
-| `emails_unidades.csv` | `unidad_id`, `inquilino1`, `inquilino2`, `dueno1`, `dueno2` |
-| `smtp.csv` | `servidor`, `puerto`, `usuario`, `password`, `tls` |
-| `mails_enviados.csv` | `fecha`, `edificio`, `numero_recibo`, `unidad`, `destinatario`, `resultado`, `detalle` |
+Todas las tablas están en `datos/expensas.db`. Las columnas se guardan como texto.
 
-Detalles de `unidades.csv`:
+| Tabla | Columnas |
+|---|---|
+| `edificios` | `id`, `nombre`, `direccion`, `localidad`, `cuit`, `admin_nombre`, `admin_cuit`, `admin_rpac` |
+| `unidades` | `id`, `edificio`, `piso`, `tipo`, `unidad`, `uf`, `inquilino`, `dueno`, `importe`, `depto_id`, `paga_junto`, `celda` |
+| `numeracion` | `edificio`, `ultimo_recibo` |
+| `historial` | `numero_recibo`, `edificio`, `fecha`, `expensas_de`, `gastos_de`, `piso`, `tipo`, `unidad`, `inquilino`, `importe`, `archivo`, `unidad_id`, y los datos para regenerar el PDF (`datos_completos`, `uf`, `dueno`, `asociadas`, `estado`, `edificio_*`, `admin_*`, `inmo_*`) |
+| `inmobiliaria` | `nombre`, `subtitulo`, `direccion`, `telefono`, `email` |
+| `preferencias` | `clave`, `valor` |
+| `maestro` | contraseña maestra hasheada y pregunta de seguridad |
+| `smtp` | `servidor`, `puerto`, `usuario`, `password`, `tls` |
+| `emails_unidades` | `unidad_id`, `inquilino1`, `inquilino2`, `dueno1`, `dueno2` |
+| `mails_enviados` | `fecha`, `edificio`, `numero_recibo`, `unidad`, `destinatario`, `resultado`, `detalle` |
+
+Detalles de la tabla `unidades`:
 
 - `id`: identificador corto único de la unidad.
 - `tipo`: `DEPTO`, `LOCAL`, `COCHERA` o `BAULERA`.
@@ -660,7 +641,7 @@ Detalles de `unidades.csv`:
   total del departamento). Solo aplica a cocheras y bauleras con departamento.
 - `celda`: celda de la planilla propia (ej. `B12`); vacía en modo automático.
 
-`historial.csv` guarda además `unidad_id` (el `id` de la unidad, o del
+La tabla `historial` guarda además `unidad_id` (el `id` de la unidad, o del
 departamento si el recibo es de un grupo que paga junto), para poder mandarlo
 por mail más adelante sin tener que volver a identificar la unidad. Los
 recibos generados antes de esta función tienen ese campo vacío.
@@ -672,7 +653,8 @@ Los importes admiten los formatos `45000`, `45000,50`, `45.000,50`, `$45.000` y
 
 **Robustez**
 
-- Los CSV inexistentes o vacíos se recrean con sus encabezados.
+- Si la base no existe, se crea sola. Si hay CSV de una versión anterior, se
+  importan a la base (y no se borran).
 - Los nombres con espacios y tildes están soportados.
 - Las unidades se guardan con columnas separadas (`piso`, `tipo`, `unidad`), sin
   suponer el formato «piso + letra» (`PB 1`, cochera `21`, baulera `14`, …).

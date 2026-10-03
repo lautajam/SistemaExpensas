@@ -136,8 +136,7 @@ class DialogoCrearMaestro(tk.Toplevel):
 
         tk.Label(
             cont, justify="left", font=("Segoe UI", 8), fg="#666666", bg=COLOR_FONDO,
-            text="Guardala bien: si la olvidás, se restablece con la pregunta de seguridad\n"
-                 "(o borrando configuracion/maestro.csv con el programa cerrado).",
+            text="Guardala bien: si la olvidás, se restablece con la pregunta de seguridad.",
         ).grid(row=len(campos) + 1, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         botones = tk.Frame(cont, bg=COLOR_FONDO)
@@ -1380,7 +1379,7 @@ class VentanaEditorDatos(tk.Toplevel):
     def __init__(self, parent, on_cambios=None):
         super().__init__(parent)
         self.on_cambios = on_cambios
-        self.title("Editor de datos (CSV)")
+        self.title("Editor de datos")
         self.configure(bg=COLOR_FONDO)
         self.geometry("920x520")
         self.transient(parent)
@@ -1409,7 +1408,7 @@ class VentanaEditorDatos(tk.Toplevel):
 
         aviso = tk.Label(
             self, bg="#fff6e0", fg="#7a5c00", font=("Segoe UI", 8), anchor="w", justify="left",
-            text=("Los cambios se guardan al instante en el archivo CSV correspondiente. "
+            text=("Los cambios se guardan al instante en la base de datos. "
                   "Editá con cuidado: por ejemplo, el nombre de un edificio debe escribirse "
                   "exactamente igual en 'Edificios' y en 'Unidades' para que sigan relacionados."),
         )
@@ -2535,7 +2534,7 @@ class App(tk.Tk):
         menu_admin.add_command(label="Configuración de la inmobiliaria", command=self._abrir_configuracion)
         menu_admin.add_command(label="Mailing", command=self._abrir_mails)
         menu_admin.add_separator()
-        menu_admin.add_command(label="Editor de datos (CSV)", command=self._abrir_editor_datos)
+        menu_admin.add_command(label="Editor de datos", command=self._abrir_editor_datos)
         menu_admin.add_separator()
         menu_admin.add_command(label="Control maestro", command=self._abrir_control_maestro)
         menubar.add_cascade(label="Administrar", menu=menu_admin)
