@@ -19,7 +19,7 @@ comprensible (messagebox), nunca como un traceback crudo de Python.
 import os
 import traceback
 import tkinter as tk
-from datetime import date
+from datetime import date, datetime
 from tkinter import ttk, messagebox, filedialog
 
 import config
@@ -2273,6 +2273,98 @@ class VentanaAyudaRecibos(tk.Toplevel):
 
 
 # ===========================================================================
+# Ventana: cargar desde backup
+# ===========================================================================
+
+class VentanaCargarBackup(tk.Toplevel):
+    """Elige un backup (de backups/ o cualquier .zip) y lo carga, reemplazando los datos actuales."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Cargar desde backup")
+        self.configure(bg=COLOR_FONDO)
+        self.geometry("660x400")
+        self.transient(parent)
+        self.grab_set()
+
+        tk.Label(self, text="Backups guardados (del más nuevo al más viejo):", font=FUENTE_BOLD,
+                 bg=COLOR_FONDO).pack(anchor="w", padx=16, pady=(14, 4))
+
+        cont = tk.Frame(self, bg=COLOR_FONDO, padx=16)
+        cont.pack(fill="both", expand=True)
+        self.tree = ttk.Treeview(cont, columns=("archivo", "fecha", "tamano"), show="headings",
+                                 height=8, selectmode="browse")
+        for c, texto, ancho in (("archivo", "Archivo", 300), ("fecha", "Fecha", 150), ("tamano", "Tamaño", 90)):
+            self.tree.heading(c, text=texto)
+            self.tree.column(c, width=ancho, anchor="w")
+        self.tree.pack(fill="both", expand=True)
+        for ruta in database.listar_backups():
+            info = os.stat(ruta)
+            self.tree.insert("", "end", iid=ruta, values=(
+                os.path.basename(ruta),
+                datetime.fromtimestamp(info.st_mtime).strftime("%d/%m/%Y %H:%M"),
+                f"{info.st_size // 1024} KB",
+            ))
+        if not self.tree.get_children():
+            tk.Label(cont, text="Todavía no hay backups en la carpeta backups/.", bg=COLOR_FONDO,
+                     fg="#666666", font=FUENTE_NORMAL).pack(anchor="w", pady=(6, 0))
+
+        pie = tk.Frame(self, bg=COLOR_FONDO, padx=16)
+        pie.pack(fill="x", pady=12)
+        tk.Button(pie, text="Cargar seleccionado", command=self._cargar_seleccionado, bg=COLOR_PRIMARIO,
+                  fg="white", font=FUENTE_BOLD, padx=12, pady=4).pack(side="left")
+        tk.Button(pie, text="Elegir otro archivo...", command=self._elegir_archivo,
+                  padx=12, pady=4).pack(side="left", padx=8)
+        tk.Button(pie, text="Cerrar", command=self.destroy, padx=12, pady=4).pack(side="right")
+
+    def _cargar_seleccionado(self):
+        seleccion = self.tree.selection()
+        if not seleccion:
+            messagebox.showwarning("Cargar backup", "Elegí un backup de la lista.", parent=self)
+            return
+        self._confirmar_y_cargar(seleccion[0])
+
+    def _elegir_archivo(self):
+        ruta = filedialog.askopenfilename(
+            parent=self, title="Elegir backup",
+            filetypes=[("Backup de expensas (.zip)", "*.zip"), ("Todos los archivos", "*.*")])
+        if ruta:
+            self._confirmar_y_cargar(ruta)
+
+    def _confirmar_y_cargar(self, ruta):
+        pregunta = ("Esto reemplaza los edificios, unidades, historial y demás datos actuales por los del backup.\n\n"
+                    "Antes se guarda una copia de los datos actuales, por si hace falta volver atrás.\n\n"
+                    "La contraseña maestra y la configuración SMTP NO se tocan.\n\n"
+                    "¿Cargar este backup?")
+        if not messagebox.askyesno("Cargar backup", pregunta, parent=self):
+            return
+
+        try:
+            copia_previa = database.crear_backup()
+        except Exception as e:
+            manejar_error("No se pudo guardar la copia previa; no se cargó nada", e)
+            return
+
+        try:
+            cantidad = database.restaurar_backup(ruta)
+        except ValueError as e:
+            messagebox.showerror("Cargar backup", str(e), parent=self)
+            return
+        except Exception as e:
+            manejar_error("No se pudo cargar el backup", e)
+            return
+
+        messagebox.showinfo(
+            "Cargar backup",
+            f"Se cargaron {cantidad} archivos del backup.\n\n"
+            f"La copia de los datos anteriores quedó en:\n{copia_previa}",
+            parent=self)
+        self.master._cargar_edificios()
+        self.master._cargar_unidades()
+        self.destroy()
+
+
+# ===========================================================================
 # Ventana principal
 # ===========================================================================
 
@@ -2305,6 +2397,8 @@ class App(tk.Tk):
 
         menu_archivo = tk.Menu(menubar, tearoff=0)
         menu_archivo.add_command(label="Copia de seguridad (backup)", command=self._hacer_backup)
+        menu_archivo.add_command(label="Cargar desde backup...",
+                                 command=lambda: requerir_maestro(self, lambda: VentanaCargarBackup(self)))
         menu_archivo.add_separator()
         menu_archivo.add_command(label="Salir", command=self.destroy)
         menubar.add_cascade(label="Archivo", menu=menu_archivo)
@@ -2855,7 +2949,10 @@ class App(tk.Tk):
     def _hacer_backup(self):
         try:
             ruta = database.crear_backup()
-            messagebox.showinfo("Copia de seguridad", f"Backup creado correctamente en:\n\n{ruta}")
+            messagebox.showinfo(
+                "Copia de seguridad",
+                f"Backup creado correctamente en:\n\n{ruta}\n\n"
+                "No incluye la contraseña maestra, la configuración SMTP ni los PDF de los recibos.")
         except Exception as e:
             manejar_error("No se pudo crear la copia de seguridad", e)
 

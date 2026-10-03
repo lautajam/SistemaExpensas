@@ -800,25 +800,84 @@ def guardar_tabla(clave, filas):
 # Copia de seguridad
 # ---------------------------------------------------------------------------
 
+# Nunca entran al backup ni se restauran desde uno: contraseña maestra y SMTP.
+_ARCHIVOS_SECRETOS = ("configuracion/maestro.csv", "configuracion/smtp.csv")
+
+# Carpetas que entran al backup. edificios/ (PDF de los recibos) queda afuera a propósito.
+_CARPETAS_BACKUP = ("datos", "configuracion", "plantilla")
+
+# Para considerar válido un zip como backup de la app.
+_ARCHIVOS_REQUERIDOS_BACKUP = ("datos/edificios.csv", "datos/unidades.csv")
+
+
+def _es_secreto(relativa):
+    return relativa.replace(os.sep, "/") in _ARCHIVOS_SECRETOS
+
+
 def crear_backup():
     """
-    Genera un .zip con las carpetas datos/ y configuracion/ dentro de
-    BASE_DIR/backups/. Devuelve la ruta del zip creado.
+    Genera un .zip en BASE_DIR/backups/ con datos/, configuracion/ y plantilla/, sin las
+    contraseñas (maestro.csv y smtp.csv) ni los PDF de los recibos. Devuelve la ruta del zip.
     """
     carpeta_backups = os.path.join(config.BASE_DIR, "backups")
     _ensure_dir(carpeta_backups)
 
     fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
     destino = os.path.join(carpeta_backups, f"backup_expensas_{fecha}.zip")
+    temporal = destino + ".tmp"   # se escribe primero aparte: un corte a mitad no deja un zip roto con nombre final
 
-    with zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as z:
-        for carpeta in (config.DATOS_DIR, config.CONFIG_DIR):
-            if not os.path.isdir(carpeta):
+    with zipfile.ZipFile(temporal, "w", zipfile.ZIP_DEFLATED) as z:
+        for carpeta in _CARPETAS_BACKUP:
+            ruta_carpeta = os.path.join(config.BASE_DIR, carpeta)
+            if not os.path.isdir(ruta_carpeta):
                 continue
-            for root, _dirs, files in os.walk(carpeta):
+            for root, _dirs, files in os.walk(ruta_carpeta):
                 for file in files:
                     ruta_completa = os.path.join(root, file)
-                    ruta_relativa = os.path.relpath(ruta_completa, config.BASE_DIR)
-                    z.write(ruta_completa, ruta_relativa)
+                    relativa = os.path.relpath(ruta_completa, config.BASE_DIR)
+                    if _es_secreto(relativa):
+                        continue
+                    z.write(ruta_completa, relativa.replace(os.sep, "/"))
 
+    os.replace(temporal, destino)
     return destino
+
+
+def listar_backups():
+    """Rutas de los .zip de BASE_DIR/backups/, del más nuevo al más viejo."""
+    carpeta = os.path.join(config.BASE_DIR, "backups")
+    if not os.path.isdir(carpeta):
+        return []
+    rutas = [os.path.join(carpeta, f) for f in os.listdir(carpeta) if f.lower().endswith(".zip")]
+    return sorted(rutas, key=os.path.getmtime, reverse=True)
+
+
+def restaurar_backup(ruta_zip):
+    """
+    Reemplaza los archivos de datos/, configuracion/ y plantilla/ por los del backup. Los archivos
+    que no están en el backup (por ejemplo los PDF, o la contraseña maestra y el SMTP, que nunca
+    se guardan) no se tocan. Devuelve la cantidad de archivos restaurados.
+    Lanza ValueError si el zip no es un backup de la app o tiene rutas no válidas.
+    """
+    with zipfile.ZipFile(ruta_zip) as z:
+        nombres = [n for n in z.namelist() if not n.endswith("/")]
+        if not all(req in nombres for req in _ARCHIVOS_REQUERIDOS_BACKUP):
+            raise ValueError("El archivo no es un backup de Sistema de Expensas "
+                             "(le faltan datos/edificios.csv o datos/unidades.csv).")
+
+        # Se leen y validan todos antes de escribir nada: si algo falla, no queda a mitad.
+        a_restaurar = []
+        for nombre in nombres:
+            if not nombre.startswith(("datos/", "configuracion/", "plantilla/")) or _es_secreto(nombre):
+                continue
+            partes = nombre.split("/")
+            if nombre.startswith("/") or ":" in nombre or any(p in ("", ".", "..") for p in partes):
+                raise ValueError(f"Ruta no válida dentro del backup: {nombre}")
+            a_restaurar.append((nombre, z.read(nombre)))
+
+    for nombre, contenido in a_restaurar:
+        destino = os.path.join(config.BASE_DIR, *nombre.split("/"))
+        _ensure_dir(os.path.dirname(destino))
+        with open(destino, "wb") as f:
+            f.write(contenido)
+    return len(a_restaurar)

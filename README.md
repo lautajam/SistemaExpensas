@@ -493,9 +493,25 @@ recibos por mail** (ver más arriba).
 
 ### Copia de seguridad
 
-**Archivo → Copia de seguridad (backup)** genera un `.zip` con las carpetas
-`datos/` y `configuracion/` dentro de `backups/`. Se recomienda realizarla con
-regularidad y siempre antes de editar los CSV a mano.
+**Archivo → Copia de seguridad (backup)** genera un `.zip` en `backups/` con:
+edificios, unidades, historial, numeración, planillas de pagos Excel, datos de
+la inmobiliaria con logo y firma, direcciones de mail de las unidades, registro
+de mails enviados, edificios archivados, preferencias y la plantilla del recibo.
+
+**No incluye** la contraseña maestra (`configuracion/maestro.csv`), la
+configuración SMTP (`configuracion/smtp.csv`) ni los PDF de los recibos
+(`edificios/`). Los PDF se pueden regenerar desde los datos; las contraseñas
+se vuelven a cargar a mano.
+
+**Archivo → Cargar desde backup...** (pide la contraseña maestra) lista los
+backups de `backups/` o permite elegir cualquier `.zip`. Antes de cargar, guarda
+una copia de los datos actuales por si hay que volver atrás. Los archivos del
+backup reemplazan a los actuales; los que no están en el backup (contraseña
+maestra, SMTP, PDF) no se tocan. Los backups hechos antes de esta versión
+pueden contener la contraseña maestra y el SMTP: conviene borrarlos.
+
+Se recomienda hacer un backup con regularidad y siempre antes de editar los
+CSV a mano.
 
 ## 11. Recibos: numeración y nombres de archivo
 
