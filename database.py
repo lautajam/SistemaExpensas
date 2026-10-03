@@ -113,6 +113,15 @@ NUMERACION_CAMPOS = ["edificio", "ultimo_recibo"]
 HISTORIAL_CAMPOS = [
     "numero_recibo", "edificio", "fecha", "expensas_de", "gastos_de",
     "piso", "tipo", "unidad", "inquilino", "importe", "archivo", "unidad_id",
+    # Datos que usa el PDF y que no están arriba. Sirven para regenerarlo igual, aunque después
+    # cambien o se borren la unidad, el edificio o la inmobiliaria.
+    "datos_completos",    # "1" si el renglón guardó estos datos (recibos emitidos desde esta versión)
+    "uf", "dueno",        # de la unidad del recibo
+    "asociadas",          # cocheras/bauleras del recibo: "tipo|piso|unidad; tipo|piso|unidad"
+    "estado",             # estado de pago de la planilla (Total, A cta., Deuda, No pagado; vacío = no figura)
+    "edificio_direccion", "edificio_localidad", "edificio_cuit",
+    "admin_nombre", "admin_cuit", "admin_rpac",
+    "inmo_nombre", "inmo_subtitulo", "inmo_direccion", "inmo_telefono", "inmo_email",
 ]
 INMOBILIARIA_CAMPOS = ["nombre", "subtitulo", "direccion", "telefono", "email"]
 
@@ -662,7 +671,18 @@ def get_next_numero(edificio_nombre):
 # Historial de recibos generados
 # ---------------------------------------------------------------------------
 
+def _asegurar_columnas(path, campos):
+    """Si el CSV tiene un encabezado viejo (le faltan columnas), lo reescribe con el nuevo sin perder filas."""
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        encabezado = next(csv.reader(f), [])
+    if set(campos) - set(encabezado):
+        _write_csv(path, campos, _read_csv(path))
+
+
 def append_historial(registro):
+    _asegurar_columnas(config.HISTORIAL_CSV, HISTORIAL_CAMPOS)
     _append_csv(config.HISTORIAL_CSV, HISTORIAL_CAMPOS, registro)
 
 

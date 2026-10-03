@@ -1836,6 +1836,91 @@ class VentanaMails(tk.Toplevel):
 # Ventana: historial de recibos
 # ===========================================================================
 
+# Estado de pago según "Gastos de" (el historial no guarda el estado, pero el texto lo dice)
+_ESTADO_POR_GASTOS = {"A CTA.": "A cta.", "DEUDA": "Deuda", "NO PAGADO": "No pagado"}
+
+
+def tiene_datos_completos(r):
+    """True si el renglón del historial guardó todos los datos del PDF (recibos emitidos desde esta versión)."""
+    return r.get("datos_completos") == "1"
+
+
+def _datos_pdf_guardados(r):
+    """Arma los datos del PDF solo con las columnas del historial: no depende de la unidad, el edificio
+    ni la inmobiliaria actuales, así que sale igual aunque después cambien o se borren."""
+    principal = {"tipo": r["tipo"], "piso": r["piso"], "unidad": r["unidad"].split(" + ")[0].strip(),
+                 "uf": r["uf"], "dueno": r["dueno"], "inquilino": r["inquilino"]}
+    agrupadas = []
+    for item in (r["asociadas"] or "").split(";"):
+        if item.strip():
+            tipo, piso, numero = (p.strip() for p in item.split("|"))
+            agrupadas.append({"tipo": tipo, "piso": piso, "unidad": numero})
+    datos_edificio = {"direccion": r["edificio_direccion"], "localidad": r["edificio_localidad"],
+                      "cuit": r["edificio_cuit"], "admin_nombre": r["admin_nombre"],
+                      "admin_cuit": r["admin_cuit"], "admin_rpac": r["admin_rpac"]}
+    inmobiliaria = {"nombre": r["inmo_nombre"], "subtitulo": r["inmo_subtitulo"], "direccion": r["inmo_direccion"],
+                    "telefono": r["inmo_telefono"], "email": r["inmo_email"]}
+    return armar_datos_recibo(
+        numero=int(r["numero_recibo"]),
+        fecha=datetime.strptime(r["fecha"], "%d/%m/%Y").date(),
+        edificio=r["edificio"], datos_edificio=datos_edificio,
+        unidad=principal, agrupadas=agrupadas,
+        expensas_de=r["expensas_de"], gastos_de=r["gastos_de"],
+        estado=r["estado"] or None, importe=float(r["importe"]), inmobiliaria=inmobiliaria,
+    )
+
+
+def datos_pdf_desde_historial(r):
+    """
+    Devuelve los mismos datos con que se armó el PDF. Si el renglón guardó sus datos completos, salen
+    exactos de sus columnas. Si es un recibo anterior, se reconstruye: lo que guarda el historial sale
+    tal cual y el resto (dueño, UF, CUIT y direcciones del edificio, inmobiliaria) sale de los datos
+    actuales. Lanza ValueError si en la reconstrucción la unidad ya no existe con ese nombre.
+    """
+    if tiene_datos_completos(r):
+        return _datos_pdf_guardados(r)
+    return _reconstruir_datos_pdf(r)
+
+
+def _reconstruir_datos_pdf(r):
+    edificio = r["edificio"]
+    todas = database.get_unidades_por_edificio(edificio)
+    por_id = indice_por_id(todas)
+    partes = [p.strip() for p in (r.get("unidad") or "").split(" + ") if p.strip()]
+    if not partes:
+        raise ValueError("El registro del historial no tiene unidad.")
+
+    principal = por_id.get(r.get("unidad_id") or "")
+    if principal is None:   # registros anteriores a unidad_id: se busca por piso, tipo y letra
+        tipo = normalizar_tipo(r.get("tipo"))
+        principal = next((u for u in todas if normalizar_tipo(u["tipo"]) == tipo
+                          and (u.get("piso") or "").strip() == (r.get("piso") or "").strip()
+                          and (u.get("unidad") or "").strip() == partes[0]), None)
+    if principal is None:
+        raise ValueError(f"No encuentro la unidad «{partes[0]}» en {edificio} (¿se borró o se renombró?).")
+    principal = dict(principal, inquilino=r.get("inquilino", ""))   # el inquilino de cuando se emitió
+
+    agrupadas = []
+    for etiqueta in partes[1:]:   # mismo texto que se guardó al emitir (sin por_id)
+        h = next((u for u in todas if etiqueta_unidad(u) == etiqueta), None)
+        if h is None:
+            raise ValueError(f"No encuentro «{etiqueta}» en {edificio} (¿se borró o se renombró?).")
+        agrupadas.append(h)
+
+    gastos_de = r.get("gastos_de", "")
+    return armar_datos_recibo(
+        numero=int(r["numero_recibo"]),
+        fecha=datetime.strptime(r["fecha"], "%d/%m/%Y").date(),
+        edificio=edificio,
+        datos_edificio=database.get_edificio(edificio) or {},
+        unidad=principal, agrupadas=agrupadas,
+        expensas_de=r.get("expensas_de", ""), gastos_de=gastos_de,
+        estado=_ESTADO_POR_GASTOS.get(gastos_de.strip().upper(), "Total"),
+        importe=float(r.get("importe") or 0),
+        inmobiliaria=database.get_inmobiliaria(),
+    )
+
+
 class _AbreRecibosMixin:
     """Abrir un PDF de la lista (self.tree / self._archivo_por_iid) o mostrarlo en su carpeta."""
 
@@ -1864,6 +1949,46 @@ class _AbreRecibosMixin:
             return
         if not revelar_en_explorador(ruta):
             messagebox.showinfo("Ubicación del archivo", ruta)
+
+    def _regenerar_pdf(self):
+        """Vuelve a armar el PDF de un recibo ya emitido, con su mismo número, a partir del historial."""
+        seleccion = self.tree.selection()
+        if not seleccion:
+            messagebox.showinfo("Regenerar PDF", "Seleccioná primero un recibo de la lista.", parent=self)
+            return
+        registro = self._filas_por_iid.get(seleccion[0])
+        if not registro or not registro.get("archivo"):
+            messagebox.showwarning("Regenerar PDF", "Este registro no tiene un archivo asociado.", parent=self)
+            return
+
+        ruta = os.path.join(config.BASE_DIR, registro["archivo"])
+        if os.path.isfile(ruta) and not messagebox.askyesno(
+                "Regenerar PDF",
+                "Este PDF todavía existe.\n\n¿Reemplazarlo por uno nuevo armado con los mismos datos?",
+                parent=self):
+            return
+        if not tiene_datos_completos(registro) and not messagebox.askyesno(
+                "Regenerar PDF",
+                "Este recibo es de antes de guardar todos sus datos. Se va a armar con los datos ACTUALES "
+                "de la unidad y del edificio: si cambiaron el dueño, la UF o los datos del consorcio, "
+                "el PDF va a salir distinto.\n\n¿Seguir?",
+                parent=self):
+            return
+
+        try:
+            datos = datos_pdf_desde_historial(registro)
+            os.makedirs(os.path.dirname(ruta), exist_ok=True)
+            generar_pdf_recibo(datos, ruta)
+        except ValueError as e:
+            messagebox.showwarning("No se pudo regenerar el PDF", str(e), parent=self)
+            return
+        except Exception as e:
+            manejar_error("No se pudo regenerar el PDF", e)
+            return
+        messagebox.showinfo(
+            "Regenerar PDF",
+            f"Recibo N° {registro['numero_recibo']} regenerado en:\n\n{ruta}",
+            parent=self)
 
 
 class _EnviarPorMailMixin:
@@ -1986,6 +2111,8 @@ class VentanaHistorial(_AbreRecibosMixin, _EnviarPorMailMixin, tk.Toplevel):
         tk.Button(pie, text="Quitar todas", command=self._quitar_todas_mail).pack(side="left", padx=6)
         tk.Button(pie, text="Enviar por mail", command=self._enviar_por_mail,
                   bg="#1f7a3d", fg="white", font=FUENTE_BOLD, padx=12, pady=4).pack(side="left", padx=6)
+        tk.Button(pie, text="Regenerar PDF", command=self._regenerar_pdf,
+                  padx=12, pady=4).pack(side="left", padx=6)
 
         self._archivo_por_iid = {}
         self._filas_por_iid = {}
@@ -2891,6 +3018,23 @@ class App(tk.Tk):
                         "importe": f"{importe_valor:.2f}",
                         "archivo": os.path.relpath(ruta_pdf, config.BASE_DIR),
                         "unidad_id": u["id"],
+                        "datos_completos": "1",
+                        "uf": u.get("uf", ""),
+                        "dueno": u.get("dueno", ""),
+                        "asociadas": "; ".join(f"{normalizar_tipo(h['tipo'])}|{h['piso']}|{h['unidad']}"
+                                               for h in agrupadas),
+                        "estado": item["estado"] or "",
+                        "edificio_direccion": datos_edificio.get("direccion", ""),
+                        "edificio_localidad": datos_edificio.get("localidad", ""),
+                        "edificio_cuit": datos_edificio.get("cuit", ""),
+                        "admin_nombre": datos_edificio.get("admin_nombre", ""),
+                        "admin_cuit": datos_edificio.get("admin_cuit", ""),
+                        "admin_rpac": datos_edificio.get("admin_rpac", ""),
+                        "inmo_nombre": inmobiliaria.get("nombre", ""),
+                        "inmo_subtitulo": inmobiliaria.get("subtitulo", ""),
+                        "inmo_direccion": inmobiliaria.get("direccion", ""),
+                        "inmo_telefono": inmobiliaria.get("telefono", ""),
+                        "inmo_email": inmobiliaria.get("email", ""),
                     }
                     database.append_historial(registro)
                     generados.append((registro, etiqueta_unidad(u, por_id) + sufijo))
