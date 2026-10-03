@@ -15,12 +15,14 @@ de nuevo en medio del archivo lo corrompería).
 import csv
 import os
 import shutil
+import tempfile
 import uuid
 import zipfile
 from datetime import datetime
 
 import config
 import correo
+import db
 import pagos
 from unidades import (DEPTO, MODO_TOTAL, TIPOS_ASOCIABLES, etiqueta_unidad, indice_por_id, normalizar_modo,
                       normalizar_tipo)
@@ -126,20 +128,17 @@ HISTORIAL_CAMPOS = [
 INMOBILIARIA_CAMPOS = ["nombre", "subtitulo", "direccion", "telefono", "email"]
 
 
-def ensure_data_files():
-    """Crea toda la estructura de carpetas/archivos si no existe todavía."""
-    _ensure_dir(config.DATOS_DIR)
-    _ensure_dir(config.CONFIG_DIR)
-    _ensure_dir(config.EDIFICIOS_DIR)
-    _ensure_dir(config.PLANTILLA_DIR)
-    _ensure_dir(config.PAGOS_DIR)
-
+def _sembrar_ejemplos_faltantes():
+    """
+    Al crear la base por primera vez: si no había CSV de edificios, unidades o inmobiliaria, carga
+    los datos de ejemplo para esas tablas (igual que antes con los archivos).
+    """
     if not os.path.exists(config.EDIFICIOS_CSV):
         edificios_ejemplo = [
             {"id": "1", "nombre": "Edificio Alsina 123"},
             {"id": "2", "nombre": "Edificio Mitre 456"},
         ]
-        _write_csv(config.EDIFICIOS_CSV, EDIFICIOS_CAMPOS, edificios_ejemplo)
+        db.reemplazar("edificios", edificios_ejemplo)
         for e in edificios_ejemplo:
             crear_carpeta_edificio(e["nombre"])
 
@@ -164,22 +163,29 @@ def ensure_data_files():
             _u(mitre, "1°", "DEPTO", "B", "Silvia Ruiz", "40000"),
             _u(mitre, "", "BAULERA", "14", "Diego Álvarez", "8000", m_1a["id"]),
         ]
-        _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, unidades_ejemplo)
-
-    if not os.path.exists(config.NUMERACION_CSV):
-        _write_csv(config.NUMERACION_CSV, NUMERACION_CAMPOS, [])
-
-    if not os.path.exists(config.HISTORIAL_CSV):
-        _write_csv(config.HISTORIAL_CSV, HISTORIAL_CAMPOS, [])
+        db.reemplazar("unidades", unidades_ejemplo)
 
     if not os.path.exists(config.INMOBILIARIA_CSV):
-        _write_csv(config.INMOBILIARIA_CSV, INMOBILIARIA_CAMPOS, [{
+        db.reemplazar("inmobiliaria", [{
             "nombre": "MI INMOBILIARIA",
             "subtitulo": "ADMINISTRACIÓN DE CONSORCIOS",
             "direccion": "Av. Ejemplo 1234, CABA",
             "telefono": "011-4444-5555",
             "email": "contacto@miinmobiliaria.com",
         }])
+
+
+db.al_crear = _sembrar_ejemplos_faltantes
+
+
+def ensure_data_files():
+    """Crea las carpetas y la base de datos si todavía no existen, y asegura las planillas de pagos."""
+    _ensure_dir(config.DATOS_DIR)
+    _ensure_dir(config.CONFIG_DIR)
+    _ensure_dir(config.EDIFICIOS_DIR)
+    _ensure_dir(config.PLANTILLA_DIR)
+    _ensure_dir(config.PAGOS_DIR)
+    db.migrar_desde_csv()   # no hace nada si la base ya existe (la de los datos de ejemplo se carga sola)
 
     # Asegura que exista la carpeta de cada edificio ya cargado
     for e in get_edificios():
@@ -192,7 +198,7 @@ def ensure_data_files():
 # ---------------------------------------------------------------------------
 
 def get_edificios():
-    filas = _read_csv(config.EDIFICIOS_CSV)
+    filas = db.leer("edificios")
     for e in filas:
         for campo in EDIFICIOS_CAMPOS:
             if e.get(campo) is None:
@@ -242,7 +248,7 @@ def update_edificio(nombre_actual, **datos):
             edificio[campo] = str(datos[campo]).strip()
 
     if nuevo == nombre_actual:
-        _write_csv(config.EDIFICIOS_CSV, EDIFICIOS_CAMPOS, edificios)
+        db.reemplazar("edificios", edificios)
         return nombre_actual
 
     carpeta_vieja, carpeta_nueva = carpeta_edificio(nombre_actual), carpeta_edificio(nuevo)
@@ -250,48 +256,44 @@ def update_edificio(nombre_actual, **datos):
             and os.path.normcase(carpeta_nueva) != os.path.normcase(carpeta_vieja):
         raise ValueError("Ya existe una carpeta de recibos con ese nombre. Elegí otro nombre.")
 
-    csvs = (config.EDIFICIOS_CSV, config.UNIDADES_CSV, config.NUMERACION_CSV, config.HISTORIAL_CSV)
-    respaldo = {ruta: open(ruta, "rb").read() for ruta in csvs if os.path.exists(ruta)}
-    renombrados = []   # (origen, destino) a deshacer si algo falla
+    renombrados = []   # (origen, destino) de carpetas y planilla, para deshacer si algo falla
     try:
-        if carpeta_vieja != carpeta_nueva and os.path.isdir(carpeta_vieja):
-            os.rename(carpeta_vieja, carpeta_nueva)
-            renombrados.append((carpeta_vieja, carpeta_nueva))
-        cambio = pagos.renombrar_planilla(nombre_actual, nuevo,
-                                          actualizar_titulo=not pagos.modo_celdas(get_unidades_por_edificio(nombre_actual)))
-        if cambio:
-            renombrados.append(cambio)
+        with db.transaccion():   # las tablas cambian todas juntas o ninguna
+            if carpeta_vieja != carpeta_nueva and os.path.isdir(carpeta_vieja):
+                os.rename(carpeta_vieja, carpeta_nueva)
+                renombrados.append((carpeta_vieja, carpeta_nueva))
+            cambio = pagos.renombrar_planilla(nombre_actual, nuevo,
+                                              actualizar_titulo=not pagos.modo_celdas(get_unidades_por_edificio(nombre_actual)))
+            if cambio:
+                renombrados.append(cambio)
 
-        unidades = get_all_unidades()
-        for u in unidades:
-            if u["edificio"] == nombre_actual:
-                u["edificio"] = nuevo
-        _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, unidades)
+            unidades = get_all_unidades()
+            for u in unidades:
+                if u["edificio"] == nombre_actual:
+                    u["edificio"] = nuevo
+            db.reemplazar("unidades", unidades)
 
-        numeracion = _read_csv(config.NUMERACION_CSV)
-        for f in numeracion:
-            if f["edificio"] == nombre_actual:
-                f["edificio"] = nuevo
-        _write_csv(config.NUMERACION_CSV, NUMERACION_CAMPOS, numeracion)
+            numeracion = db.leer("numeracion")
+            for f in numeracion:
+                if f["edificio"] == nombre_actual:
+                    f["edificio"] = nuevo
+            db.reemplazar("numeracion", numeracion)
 
-        historial = _read_csv(config.HISTORIAL_CSV)
-        for r in historial:
-            if r["edificio"] == nombre_actual:
-                r["edificio"] = nuevo
-                r["archivo"] = _reemplazar_prefijo_archivo(r.get("archivo") or "", carpeta_vieja, carpeta_nueva)
-        _write_csv(config.HISTORIAL_CSV, HISTORIAL_CAMPOS, historial)
+            historial = db.leer("historial")
+            for r in historial:
+                if r["edificio"] == nombre_actual:
+                    r["edificio"] = nuevo
+                    r["archivo"] = _reemplazar_prefijo_archivo(r.get("archivo") or "", carpeta_vieja, carpeta_nueva)
+            db.reemplazar("historial", historial)
 
-        edificio["nombre"] = nuevo
-        _write_csv(config.EDIFICIOS_CSV, EDIFICIOS_CAMPOS, edificios)
+            edificio["nombre"] = nuevo
+            db.reemplazar("edificios", edificios)
     except Exception:
         for origen, destino in reversed(renombrados):
             try:
                 os.replace(destino, origen)
             except OSError:
                 pass
-        for ruta, contenido in respaldo.items():
-            with open(ruta, "wb") as f:
-                f.write(contenido)
         raise
 
     _sincronizar_pagos_seguro(nuevo)
@@ -305,7 +307,7 @@ def resumen_edificio(nombre):
         if os.path.isdir(carpeta) else 0
     return {
         "unidades": len(get_unidades_por_edificio(nombre)),
-        "recibos": sum(1 for r in _read_csv(config.HISTORIAL_CSV) if r.get("edificio") == nombre),
+        "recibos": sum(1 for r in db.leer("historial") if r.get("edificio") == nombre),
         "pdfs": pdfs,
         "planilla": os.path.isfile(pagos.ruta_pagos_edificio(nombre)),
     }
@@ -337,8 +339,6 @@ def delete_edificio(nombre):
     while os.path.exists(destino):
         destino, n = f"{base_destino}_{n}", n + 1
 
-    csvs = (config.EDIFICIOS_CSV, config.UNIDADES_CSV, config.NUMERACION_CSV, config.HISTORIAL_CSV)
-    respaldo = {ruta: open(ruta, "rb").read() for ruta in csvs if os.path.exists(ruta)}
     movidos = []   # (origen, destino) a deshacer si algo falla
     try:
         os.makedirs(destino)
@@ -346,9 +346,9 @@ def delete_edificio(nombre):
         _write_csv(os.path.join(destino, "unidades.csv"), UNIDADES_CAMPOS,
                    [u for u in get_all_unidades() if u["edificio"] == nombre])
         _write_csv(os.path.join(destino, "historial.csv"), HISTORIAL_CAMPOS,
-                   [r for r in _read_csv(config.HISTORIAL_CSV) if r.get("edificio") == nombre])
+                   [r for r in db.leer("historial") if r.get("edificio") == nombre])
         _write_csv(os.path.join(destino, "numeracion.csv"), NUMERACION_CAMPOS,
-                   [r for r in _read_csv(config.NUMERACION_CSV) if r.get("edificio") == nombre])
+                   [r for r in db.leer("numeracion") if r.get("edificio") == nombre])
         with open(os.path.join(destino, "LEEME.txt"), "w", encoding="utf-8") as f:
             f.write(f"Edificio «{nombre}» borrado el {datetime.now():%d/%m/%Y %H:%M}.\n"
                     "Acá quedaron sus datos: edificio.csv, unidades.csv, historial.csv, numeracion.csv,\n"
@@ -364,21 +364,17 @@ def delete_edificio(nombre):
             shutil.move(ruta, nuevo)
             movidos.append((ruta, nuevo))
 
-        _write_csv(config.EDIFICIOS_CSV, EDIFICIOS_CAMPOS, [e for e in get_edificios() if e["nombre"] != nombre])
-        _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, [u for u in get_all_unidades() if u["edificio"] != nombre])
-        _write_csv(config.NUMERACION_CSV, NUMERACION_CAMPOS,
-                   [r for r in _read_csv(config.NUMERACION_CSV) if r.get("edificio") != nombre])
-        _write_csv(config.HISTORIAL_CSV, HISTORIAL_CAMPOS,
-                   [r for r in _read_csv(config.HISTORIAL_CSV) if r.get("edificio") != nombre])
+        with db.transaccion():   # si algo falla, la base queda como estaba
+            db.reemplazar("edificios", [e for e in get_edificios() if e["nombre"] != nombre])
+            db.reemplazar("unidades", [u for u in get_all_unidades() if u["edificio"] != nombre])
+            db.reemplazar("numeracion", [r for r in db.leer("numeracion") if r.get("edificio") != nombre])
+            db.reemplazar("historial", [r for r in db.leer("historial") if r.get("edificio") != nombre])
     except Exception:
         for origen, nuevo in reversed(movidos):
             try:
                 shutil.move(nuevo, origen)
             except OSError:
                 pass
-        for ruta, contenido in respaldo.items():
-            with open(ruta, "wb") as f:
-                f.write(contenido)
         if not any(os.path.exists(nuevo) for _origen, nuevo in movidos):   # todo volvió a su lugar: no dejar restos
             shutil.rmtree(destino, ignore_errors=True)
         raise
@@ -398,7 +394,7 @@ def add_edificio(nombre):
     nuevo_id = str(max(ids_existentes, default=0) + 1)
 
     edificios.append({"id": nuevo_id, "nombre": nombre})
-    _write_csv(config.EDIFICIOS_CSV, EDIFICIOS_CAMPOS, edificios)
+    db.reemplazar("edificios", edificios)
     crear_carpeta_edificio(nombre)
     _sincronizar_pagos_seguro(nombre)
     return nuevo_id
@@ -419,7 +415,7 @@ def crear_carpeta_edificio(nombre_edificio):
 # ---------------------------------------------------------------------------
 
 def get_all_unidades():
-    filas = _read_csv(config.UNIDADES_CSV)
+    filas = db.leer("unidades")
     for u in filas:
         for campo in UNIDADES_CAMPOS:
             if u.get(campo) is None:
@@ -527,7 +523,7 @@ def add_unidad(edificio, piso, tipo, unidad, inquilino, importe, depto_id="", as
             raise ValueError("Solo un depto puede tener cocheras o bauleras asociadas.")
         todas.extend(_filas_asociadas(nueva, asociadas))
     _validar_celdas(todas, edificio)
-    _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
+    db.reemplazar("unidades", todas)
     _sincronizar_pagos_seguro(edificio)
     return nueva["id"]
 
@@ -540,7 +536,7 @@ def add_asociadas(depto_id, asociadas):
         raise ValueError("El depto indicado no existe.")
     todas.extend(_filas_asociadas(depto, asociadas))
     _validar_celdas(todas, depto["edificio"])
-    _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
+    db.reemplazar("unidades", todas)
     _sincronizar_pagos_seguro(depto["edificio"])
 
 
@@ -577,7 +573,7 @@ def update_unidad(unidad_id, **campos):
             if x["depto_id"] == unidad_id and x["inquilino"] == inquilino_anterior:
                 x["inquilino"] = u["inquilino"]
 
-    _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
+    db.reemplazar("unidades", todas)
     for nombre in edificios_afectados:
         _sincronizar_pagos_seguro(nombre)
 
@@ -594,7 +590,7 @@ def set_celdas(edificio, celdas_por_id):
             u["celda"] = "" if normalizar_modo(u["paga_junto"]) == MODO_TOTAL and u["depto_id"] \
                 else pagos.normalizar_celda(celdas_por_id[u["id"]])
     _validar_celdas(todas, edificio)
-    _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
+    db.reemplazar("unidades", todas)
 
 
 def set_importes(importes_por_id):
@@ -603,7 +599,7 @@ def set_importes(importes_por_id):
     for u in todas:
         if u["id"] in importes_por_id:
             u["importe"] = str(importes_por_id[u["id"]])
-    _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, todas)
+    db.reemplazar("unidades", todas)
 
 
 def unidades_a_borrar(unidad_id):
@@ -626,7 +622,7 @@ def delete_unidad(unidad_id):
         raise ValueError("No se encontró la unidad indicada.")
     ids = {u["id"] for u in borradas}
     restantes = [u for u in get_all_unidades() if u["id"] not in ids]
-    _write_csv(config.UNIDADES_CSV, UNIDADES_CAMPOS, restantes)
+    db.reemplazar("unidades", restantes)
     _sincronizar_pagos_seguro(borradas[0]["edificio"])
     correo.borrar_emails_unidades(ids)
     return borradas
@@ -637,7 +633,7 @@ def delete_unidad(unidad_id):
 # ---------------------------------------------------------------------------
 
 def get_ultimo_numero(edificio_nombre):
-    filas = _read_csv(config.NUMERACION_CSV)
+    filas = db.leer("numeracion")
     for f in filas:
         if f["edificio"] == edificio_nombre:
             return int(f["ultimo_recibo"])
@@ -649,7 +645,7 @@ def get_next_numero(edificio_nombre):
     Incrementa y PERSISTE de inmediato el número de recibo del edificio dado.
     Se debe llamar una vez por cada recibo efectivamente generado.
     """
-    filas = _read_csv(config.NUMERACION_CSV)
+    filas = db.leer("numeracion")
     encontrado = None
     for f in filas:
         if f["edificio"] == edificio_nombre:
@@ -663,7 +659,7 @@ def get_next_numero(edificio_nombre):
         siguiente = int(encontrado["ultimo_recibo"]) + 1
         encontrado["ultimo_recibo"] = str(siguiente)
 
-    _write_csv(config.NUMERACION_CSV, NUMERACION_CAMPOS, filas)
+    db.reemplazar("numeracion", filas)
     return siguiente
 
 
@@ -671,23 +667,12 @@ def get_next_numero(edificio_nombre):
 # Historial de recibos generados
 # ---------------------------------------------------------------------------
 
-def _asegurar_columnas(path, campos):
-    """Si el CSV tiene un encabezado viejo (le faltan columnas), lo reescribe con el nuevo sin perder filas."""
-    if not os.path.exists(path):
-        return
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
-        encabezado = next(csv.reader(f), [])
-    if set(campos) - set(encabezado):
-        _write_csv(path, campos, _read_csv(path))
-
-
 def append_historial(registro):
-    _asegurar_columnas(config.HISTORIAL_CSV, HISTORIAL_CAMPOS)
-    _append_csv(config.HISTORIAL_CSV, HISTORIAL_CAMPOS, registro)
+    db.agregar("historial", registro)
 
 
 def get_historial():
-    filas = _read_csv(config.HISTORIAL_CSV)
+    filas = db.leer("historial")
     for r in filas:
         for campo in HISTORIAL_CAMPOS:
             if r.get(campo) is None:
@@ -700,14 +685,14 @@ def get_historial():
 # ---------------------------------------------------------------------------
 
 def get_inmobiliaria():
-    filas = _read_csv(config.INMOBILIARIA_CSV)
+    filas = db.leer("inmobiliaria")
     fila = filas[0] if filas else {}
     return {campo: fila.get(campo) or "" for campo in INMOBILIARIA_CAMPOS}
 
 
 def save_inmobiliaria(datos):
     fila = {campo: datos.get(campo, "") for campo in INMOBILIARIA_CAMPOS}
-    _write_csv(config.INMOBILIARIA_CSV, INMOBILIARIA_CAMPOS, [fila])
+    db.reemplazar("inmobiliaria", [fila])
 
 
 # Logo y firma digital de la inmobiliaria: se guardan como configuracion/logo.png y
@@ -762,16 +747,16 @@ PREFERENCIAS_CAMPOS = ["clave", "valor"]
 
 
 def get_preferencia(clave, por_defecto=""):
-    for fila in _read_csv(config.PREFERENCIAS_CSV):
+    for fila in db.leer("preferencias"):
         if fila.get("clave") == clave:
             return fila.get("valor") or por_defecto
     return por_defecto
 
 
 def set_preferencia(clave, valor):
-    filas = [f for f in _read_csv(config.PREFERENCIAS_CSV) if f.get("clave") != clave]
+    filas = [f for f in db.leer("preferencias") if f.get("clave") != clave]
     filas.append({"clave": clave, "valor": str(valor)})
-    _write_csv(config.PREFERENCIAS_CSV, PREFERENCIAS_CAMPOS, filas)
+    db.reemplazar("preferencias", filas)
 
 
 # ---------------------------------------------------------------------------
@@ -782,11 +767,12 @@ def set_preferencia(clave, valor):
 # ---------------------------------------------------------------------------
 
 def _tablas_editables():
+    """clave de la pantalla -> (tabla de la base, campos, etiqueta visible)."""
     return {
-        "edificios": (config.EDIFICIOS_CSV, EDIFICIOS_CAMPOS, "Edificios"),
-        "unidades": (config.UNIDADES_CSV, UNIDADES_CAMPOS, "Unidades"),
-        "inmobiliaria": (config.INMOBILIARIA_CSV, INMOBILIARIA_CAMPOS, "Inmobiliaria"),
-        "historial": (config.HISTORIAL_CSV, HISTORIAL_CAMPOS, "Historial de recibos"),
+        "edificios": ("edificios", EDIFICIOS_CAMPOS, "Edificios"),
+        "unidades": ("unidades", UNIDADES_CAMPOS, "Unidades"),
+        "inmobiliaria": ("inmobiliaria", INMOBILIARIA_CAMPOS, "Inmobiliaria"),
+        "historial": ("historial", HISTORIAL_CAMPOS, "Historial de recibos"),
     }
 
 
@@ -802,15 +788,15 @@ def get_campos_tabla(clave):
 
 
 def leer_tabla(clave):
-    """Devuelve (campos, filas) de la tabla indicada, leída desde el CSV."""
-    ruta, campos, _etiqueta = _tablas_editables()[clave]
-    return list(campos), _read_csv(ruta)
+    """Devuelve (campos, filas) de la tabla indicada, leída desde la base."""
+    tabla, campos, _etiqueta = _tablas_editables()[clave]
+    return list(campos), db.leer(tabla)
 
 
 def guardar_tabla(clave, filas):
-    """Sobrescribe por completo el CSV de la tabla indicada con 'filas'."""
-    ruta, campos, _etiqueta = _tablas_editables()[clave]
-    _write_csv(ruta, campos, filas)
+    """Reemplaza por completo el contenido de la tabla indicada con 'filas'."""
+    tabla, _campos, _etiqueta = _tablas_editables()[clave]
+    db.reemplazar(tabla, filas)
     if clave in ("edificios", "unidades"):
         for e in get_edificios():
             _sincronizar_pagos_seguro(e["nombre"])
@@ -821,23 +807,32 @@ def guardar_tabla(clave, filas):
 # ---------------------------------------------------------------------------
 
 # Nunca entran al backup ni se restauran desde uno: contraseña maestra y SMTP.
+# (Están en la base, en las tablas db.TABLAS_SECRETAS, y también en sus CSV viejos.)
 _ARCHIVOS_SECRETOS = ("configuracion/maestro.csv", "configuracion/smtp.csv")
 
 # Carpetas que entran al backup. edificios/ (PDF de los recibos) queda afuera a propósito.
 _CARPETAS_BACKUP = ("datos", "configuracion", "plantilla")
 
-# Para considerar válido un zip como backup de la app.
+# Para considerar válido un zip como backup de la app: la base nueva, o los CSV de los backups viejos.
 _ARCHIVOS_REQUERIDOS_BACKUP = ("datos/edificios.csv", "datos/unidades.csv")
+_NOMBRE_BASE_EN_BACKUP = "datos/expensas.db"
 
 
 def _es_secreto(relativa):
     return relativa.replace(os.sep, "/") in _ARCHIVOS_SECRETOS
 
 
+def _es_csv_de_tabla(relativa):
+    """CSV sueltos de datos/ y configuracion/: ya están en la base, no se respaldan por separado."""
+    partes = relativa.replace(os.sep, "/").split("/")
+    return len(partes) == 2 and partes[0] in ("datos", "configuracion") and partes[1].lower().endswith(".csv")
+
+
 def crear_backup():
     """
-    Genera un .zip en BASE_DIR/backups/ con datos/, configuracion/ y plantilla/, sin las
-    contraseñas (maestro.csv y smtp.csv) ni los PDF de los recibos. Devuelve la ruta del zip.
+    Genera un .zip en BASE_DIR/backups/ con la base de datos (sin las contraseñas), las planillas,
+    la plantilla y los demás archivos de configuración. No incluye los PDF de los recibos.
+    Devuelve la ruta del zip.
     """
     carpeta_backups = os.path.join(config.BASE_DIR, "backups")
     _ensure_dir(carpeta_backups)
@@ -846,18 +841,23 @@ def crear_backup():
     destino = os.path.join(carpeta_backups, f"backup_expensas_{fecha}.zip")
     temporal = destino + ".tmp"   # se escribe primero aparte: un corte a mitad no deja un zip roto con nombre final
 
-    with zipfile.ZipFile(temporal, "w", zipfile.ZIP_DEFLATED) as z:
-        for carpeta in _CARPETAS_BACKUP:
-            ruta_carpeta = os.path.join(config.BASE_DIR, carpeta)
-            if not os.path.isdir(ruta_carpeta):
-                continue
-            for root, _dirs, files in os.walk(ruta_carpeta):
-                for file in files:
-                    ruta_completa = os.path.join(root, file)
-                    relativa = os.path.relpath(ruta_completa, config.BASE_DIR)
-                    if _es_secreto(relativa):
-                        continue
-                    z.write(ruta_completa, relativa.replace(os.sep, "/"))
+    with tempfile.TemporaryDirectory() as tmp:
+        copia_base = os.path.join(tmp, "expensas.db")
+        db.copiar_sin_secretos(copia_base)   # la base real no se toca; la copia no tiene contraseñas
+        with zipfile.ZipFile(temporal, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(copia_base, _NOMBRE_BASE_EN_BACKUP)
+            for carpeta in _CARPETAS_BACKUP:
+                ruta_carpeta = os.path.join(config.BASE_DIR, carpeta)
+                if not os.path.isdir(ruta_carpeta):
+                    continue
+                for root, _dirs, files in os.walk(ruta_carpeta):
+                    for file in files:
+                        ruta_completa = os.path.join(root, file)
+                        relativa = os.path.relpath(ruta_completa, config.BASE_DIR).replace(os.sep, "/")
+                        if _es_secreto(relativa) or _es_csv_de_tabla(relativa) \
+                                or relativa.startswith(_NOMBRE_BASE_EN_BACKUP):
+                            continue
+                        z.write(ruta_completa, relativa)
 
     os.replace(temporal, destino)
     return destino
@@ -874,30 +874,56 @@ def listar_backups():
 
 def restaurar_backup(ruta_zip):
     """
-    Reemplaza los archivos de datos/, configuracion/ y plantilla/ por los del backup. Los archivos
-    que no están en el backup (por ejemplo los PDF, o la contraseña maestra y el SMTP, que nunca
-    se guardan) no se tocan. Devuelve la cantidad de archivos restaurados.
+    Reemplaza la base y los archivos de datos/, configuracion/ y plantilla/ por los del backup.
+    Acepta backups nuevos (con la base) y los viejos (con CSV, que se pasan a la base).
+    Las contraseñas actuales se conservan: no vienen en el backup y no se pisan. Los PDF no se tocan.
+    Devuelve la cantidad de archivos restaurados.
     Lanza ValueError si el zip no es un backup de la app o tiene rutas no válidas.
     """
     with zipfile.ZipFile(ruta_zip) as z:
         nombres = [n for n in z.namelist() if not n.endswith("/")]
-        if not all(req in nombres for req in _ARCHIVOS_REQUERIDOS_BACKUP):
+        tiene_base = _NOMBRE_BASE_EN_BACKUP in nombres
+        if not (tiene_base or all(req in nombres for req in _ARCHIVOS_REQUERIDOS_BACKUP)):
             raise ValueError("El archivo no es un backup de Sistema de Expensas "
-                             "(le faltan datos/edificios.csv o datos/unidades.csv).")
+                             "(no tiene la base de datos ni los CSV de los edificios y unidades).")
 
         # Se leen y validan todos antes de escribir nada: si algo falla, no queda a mitad.
         a_restaurar = []
         for nombre in nombres:
-            if not nombre.startswith(("datos/", "configuracion/", "plantilla/")) or _es_secreto(nombre):
+            if not nombre.startswith(("datos/", "configuracion/", "plantilla/")):
+                continue
+            if _es_secreto(nombre) or _es_csv_de_tabla(nombre) or nombre == _NOMBRE_BASE_EN_BACKUP:
                 continue
             partes = nombre.split("/")
             if nombre.startswith("/") or ":" in nombre or any(p in ("", ".", "..") for p in partes):
                 raise ValueError(f"Ruta no válida dentro del backup: {nombre}")
             a_restaurar.append((nombre, z.read(nombre)))
 
+        with tempfile.TemporaryDirectory() as tmp:
+            base_nueva = os.path.join(tmp, "expensas.db")
+            if tiene_base:
+                with open(base_nueva, "wb") as f:
+                    f.write(z.read(_NOMBRE_BASE_EN_BACKUP))
+            else:   # backup viejo: los CSV pasan a una base nueva
+                origen = {}
+                for tabla, (ruta_csv, _campos) in db.ESQUEMA.items():
+                    en_zip = os.path.relpath(ruta_csv, config.BASE_DIR).replace(os.sep, "/")
+                    if en_zip in nombres:
+                        destino_csv = os.path.join(tmp, en_zip.replace("/", "_"))
+                        with open(destino_csv, "wb") as f:
+                            f.write(z.read(en_zip))
+                        origen[tabla] = destino_csv
+                db.migrar_desde_csv(base_nueva, origen)
+
+            # Las contraseñas de hoy se conservan tal cual, aunque el backup sea de antes.
+            secretos = {tabla: db.leer(tabla) for tabla in db.TABLAS_SECRETAS}
+            db.reemplazar_base(base_nueva)
+            for tabla, filas in secretos.items():
+                db.reemplazar(tabla, filas)
+
     for nombre, contenido in a_restaurar:
         destino = os.path.join(config.BASE_DIR, *nombre.split("/"))
         _ensure_dir(os.path.dirname(destino))
         with open(destino, "wb") as f:
             f.write(contenido)
-    return len(a_restaurar)
+    return len(a_restaurar) + 1   # + la base

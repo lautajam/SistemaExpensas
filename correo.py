@@ -5,13 +5,12 @@ correo.py
 Envío de recibos por mail: direcciones de cada unidad (hasta 4: inquilino y dueño),
 configuración SMTP y el registro de qué se mandó.
 
-Como con maestro.py, cada cosa vive en su propio CSV (por ahora; están pensados para
-poder pasar a una base de datos más adelante sin cambiar esta interfaz):
+Los datos viven en la base de datos (ver db.py), en estas tablas:
 
-    datos/emails_unidades.csv   una fila por unidad (por su id), con sus 4 direcciones
-    configuracion/smtp.csv      un solo registro con lo necesario para mandar mails:
-                                 servidor, puerto, usuario, contraseña y seguridad
-    datos/mails_enviados.csv    un renglón por cada envío (a quién, cuándo, resultado)
+    emails_unidades   una fila por unidad (por su id), con sus 4 direcciones
+    smtp              un solo registro con lo necesario para mandar mails:
+                       servidor, puerto, usuario, contraseña y seguridad
+    mails_enviados    un renglón por cada envío (a quién, cuándo, resultado)
 
 El mail se manda "de" el propio usuario SMTP (no hay nombre/mail de remitente aparte:
 en la gran mayoría de los servidores, Gmail incluido, el remitente tiene que ser esa
@@ -20,7 +19,6 @@ hace falta poder usarla para conectarse al servidor); el acceso a esta pantalla 
 protegido por la contraseña maestra.
 """
 
-import csv
 import os
 import re
 import smtplib
@@ -28,6 +26,7 @@ from datetime import datetime
 from email.message import EmailMessage
 
 import config
+import db
 from recibo import abreviar_periodo
 
 EMAILS_CAMPOS = ["unidad_id", "inquilino1", "inquilino2", "dueno1", "dueno2"]
@@ -35,37 +34,6 @@ SMTP_CAMPOS = ["servidor", "puerto", "usuario", "password", "tls"]
 ENVIADOS_CAMPOS = ["fecha", "edificio", "numero_recibo", "unidad", "destinatario", "resultado", "detalle"]
 
 _RE_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
-# ---------------------------------------------------------------------------
-# CSV: helpers propios (igual que maestro.py, para no depender de database.py
-# y evitar una importación circular: database.py sí importa correo.py)
-# ---------------------------------------------------------------------------
-
-def _read_csv(path):
-    if not os.path.exists(path):
-        return []
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
-        return [dict(row) for row in csv.DictReader(f)]
-
-
-def _write_csv(path, fieldnames, rows):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({k: row.get(k, "") for k in fieldnames})
-
-
-def _append_csv(path, fieldnames, row):
-    existe = os.path.exists(path)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if not existe:
-            writer.writeheader()
-        writer.writerow({k: row.get(k, "") for k in fieldnames})
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +47,7 @@ def es_email_valido(texto):
 def get_emails_unidades(edificio=None):
     """{unidad_id: {inquilino1, inquilino2, dueno1, dueno2}}. 'edificio' no filtra acá: el CSV
     no sabe de edificios (va por id de unidad), se filtra afuera contra las unidades del edificio."""
-    filas = _read_csv(config.EMAILS_UNIDADES_CSV)
+    filas = db.leer("emails_unidades")
     return {f["unidad_id"]: {c: (f.get(c) or "").strip() for c in EMAILS_CAMPOS[1:]} for f in filas if f.get("unidad_id")}
 
 
@@ -101,7 +69,7 @@ def set_emails_unidades(datos_por_unidad):
     actuales = get_emails_unidades()
     actuales.update({uid: {c: (v.get(c) or "").strip() for c in EMAILS_CAMPOS[1:]} for uid, v in datos_por_unidad.items()})
     filas = [dict(unidad_id=uid, **valores) for uid, valores in actuales.items() if any(valores.values())]
-    _write_csv(config.EMAILS_UNIDADES_CSV, EMAILS_CAMPOS, filas)
+    db.reemplazar("emails_unidades", filas)
 
 
 def borrar_emails_unidades(unidad_ids):
@@ -111,7 +79,7 @@ def borrar_emails_unidades(unidad_ids):
     if not (actuales.keys() & unidad_ids):
         return
     filas = [dict(unidad_id=uid, **v) for uid, v in actuales.items() if uid not in unidad_ids]
-    _write_csv(config.EMAILS_UNIDADES_CSV, EMAILS_CAMPOS, filas)
+    db.reemplazar("emails_unidades", filas)
 
 
 # ---------------------------------------------------------------------------
@@ -120,11 +88,11 @@ def borrar_emails_unidades(unidad_ids):
 # ---------------------------------------------------------------------------
 
 def existe_smtp():
-    return os.path.isfile(config.SMTP_CSV)
+    return bool(db.leer("smtp"))
 
 
 def get_smtp():
-    filas = _read_csv(config.SMTP_CSV)
+    filas = db.leer("smtp")
     fila = filas[0] if filas else {}
     return {campo: fila.get(campo) or "" for campo in SMTP_CAMPOS}
 
@@ -138,7 +106,7 @@ def guardar_smtp(datos):
         raise ValueError("El puerto tiene que ser un número.")
     if not fila["usuario"] or not es_email_valido(fila["usuario"]):
         raise ValueError("El usuario tiene que ser un mail válido: es también la dirección que figura como remitente.")
-    _write_csv(config.SMTP_CSV, SMTP_CAMPOS, [fila])
+    db.reemplazar("smtp", [fila])
 
 
 def _conectar(smtp):
@@ -228,7 +196,7 @@ def enviar_mail(smtp, destinatario, asunto, cuerpo, ruta_adjunto):
 
 
 def registrar_envio(edificio, fila_historial, destinatario, ok, detalle=""):
-    _append_csv(config.MAILS_ENVIADOS_CSV, ENVIADOS_CAMPOS, {
+    db.agregar("mails_enviados", {
         "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
         "edificio": edificio,
         "numero_recibo": fila_historial.get("numero_recibo", ""),
