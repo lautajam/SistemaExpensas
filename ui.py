@@ -592,8 +592,9 @@ class DialogoUnidad(tk.Toplevel):
         entrada_fila(7, self.var_dueno)
         etiqueta_fila(8, "Inquilino:")
         entrada_fila(8, self.var_inquilino)
-        etiqueta_fila(9, "Importe:")
-        entrada_fila(9, self.var_importe)
+        if not self.unidad:   # al editar, el importe no se toca acá: se carga desde la planilla de pagos
+            etiqueta_fila(9, "Importe:")
+            entrada_fila(9, self.var_importe)
 
         self.frame_asociadas = tk.Frame(cont, bg=COLOR_FONDO)
         self.frame_asociadas.grid(row=10, column=0, columnspan=2, sticky="we", pady=(10, 0))
@@ -796,7 +797,7 @@ class DialogoUnidad(tk.Toplevel):
                     database.update_unidad(
                         self.unidad["id"],
                         piso=piso, tipo=tipo, unidad=unidad_txt, uf=uf, dueno=dueno,
-                        inquilino=inquilino, importe=str(importe), depto_id=depto_id,
+                        inquilino=inquilino, depto_id=depto_id,
                         paga_junto=modo, celda=celda,
                     )
                     depto_propio = self.unidad["id"]
@@ -2624,7 +2625,6 @@ class App(tk.Tk):
         scrollbar.pack(side="right", fill="y")
 
         self.tree.bind("<Button-1>", self._click_en_tabla)
-        self.tree.bind("<Double-1>", self._doble_click_en_tabla)
 
     def _crear_pie(self):
         pie = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=10)
@@ -2764,17 +2764,6 @@ class App(tk.Tk):
             return
         if columna == self._col_sel:  # columna de selección
             self._alternar_seleccion(fila)
-
-    def _doble_click_en_tabla(self, event):
-        fila = self.tree.identify_row(event.y)
-        columna = self.tree.identify_column(event.x)
-        if not fila:
-            return
-        if columna == self._col_sel:
-            return  # ya se maneja como clic simple
-        unidad = self._unidades_por_iid.get(fila)
-        if unidad:
-            DialogoUnidad(self, self.var_edificio.get(), unidad=unidad, on_guardar=self._recargar_unidades)
 
     def _marcar(self, iid, marcar):
         (self.seleccionadas.add if marcar else self.seleccionadas.discard)(iid)

@@ -170,8 +170,8 @@ ver o cambiar datos, usar **Administrar** y **Administrar → Editor de datos**.
    `obtener_periodos()` de `utils.py`.
 3. Marcar las unidades con la casilla de la última columna (☐ / ☑), o usar
    **Seleccionar todas** / **Quitar todas**.
-4. Cargar los importes con **Actualizar montos desde planilla**. Para un
-   importe puntual distinto, se edita la unidad con doble clic sobre su fila.
+4. Cargar los importes con **Actualizar montos desde planilla**. Los importes
+   solo se cargan desde la planilla de pagos: la pantalla principal no edita unidades.
 5. Pulsar **GENERAR RECIBOS PDF**. Tras la confirmación se genera un PDF por
    cada recibo en `edificios/<Edificio>/`.
 6. Al terminar, si se generó al menos un recibo, se abre una ventana con los
@@ -297,7 +297,7 @@ recibo con su propia plantilla (sección 12).
 
 ### Cocheras y bauleras de un departamento
 
-En la ventana de edición del departamento (doble clic) se administra la lista
+En **Administrar → Administrar edificios/unidades**, al editar el departamento, se administra la lista
 de sus cocheras y bauleras:
 
 - **Vincular existente:** asocia cocheras o bauleras sueltas del edificio.
@@ -340,7 +340,7 @@ Al marcar un departamento se marcan también sus cocheras y bauleras visibles,
 que luego pueden desmarcarse individualmente. Se genera un recibo por cada
 fila marcada.
 
-Para borrar una unidad: doble clic sobre ella y **Borrar unidad** (o desde
+Para borrar una unidad, desde **Administrar → Administrar edificios/unidades**: doble clic sobre ella y **Borrar unidad** (o desde
 Administrar). Al borrar un departamento se borran también sus cocheras y
 bauleras, previa confirmación con la lista completa. Las unidades se quitan de
 la planilla de pagos; los recibos ya generados y el historial no se modifican.
