@@ -2856,14 +2856,25 @@ class App(tk.Tk):
         if not edificio:
             messagebox.showwarning("Atención", "Seleccioná un edificio.")
             return
+        ruta = pagos.ruta_pagos_edificio(edificio)
+        unidades = database.get_unidades_por_edificio(edificio)
+        faltaba = not os.path.isfile(ruta)
         try:
-            database.sincronizar_pagos(edificio)
+            if faltaba and pagos.modo_celdas(unidades):
+                pagos.crear_planilla_en_blanco(edificio, unidades)   # planilla propia: se rearma en sus celdas
+            else:
+                database.sincronizar_pagos(edificio)                 # automática: la crea si no existe
         except PermissionError:
             pass  # ya está abierta: se abre/muestra tal como está
         except Exception as e:
             manejar_error("No se pudo preparar la planilla de pagos", e)
             return
-        ok, mensaje = abrir_pdf(pagos.ruta_pagos_edificio(edificio))
+        if faltaba and os.path.isfile(ruta):
+            messagebox.showinfo(
+                "Planilla de pagos",
+                f"La planilla de «{edificio}» faltaba: se rearmó en blanco.\n\n"
+                "Los montos anteriores no están: hay que cargarlos de nuevo.")
+        ok, mensaje = abrir_pdf(ruta)
         if not ok:
             messagebox.showinfo("Planilla de pagos", mensaje)
 
