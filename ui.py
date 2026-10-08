@@ -72,8 +72,7 @@ def mostrar_avisos():
 
 # ===========================================================================
 # Contraseña maestra (ver maestro.py): protege abrir Administrar edificios/unidades,
-# Configuración de la inmobiliaria y el Editor de datos (CSV), y cada alta/edición/
-# borrado dentro de ellas.
+# Mailing y Configuración de la inmobiliaria, y cada alta/edición/borrado dentro de ellas.
 #
 # Todos estos diálogos son asincrónicos (como el resto de la app: on_guardar/on_ok en
 # vez de bloquear), para no depender de un mainloop anidado.
@@ -1314,205 +1313,6 @@ class VentanaAdministracion(tk.Toplevel):
 
 
 # ===========================================================================
-# Diálogo genérico: alta / edición de una fila de cualquier tabla CSV
-# ===========================================================================
-
-class DialogoFilaGenerica(tk.Toplevel):
-    """
-    Formulario genérico que muestra un Entry por cada columna de la tabla
-    (sin ningún formateo ni validación especial: es una edición "cruda",
-    equivalente a editar la celda directamente en el CSV/Excel).
-    """
-
-    def __init__(self, parent, titulo, campos, valores=None, on_guardar=None,
-                 campos_solo_lectura=None):
-        super().__init__(parent)
-        self.campos = campos
-        self.valores = valores or {}
-        self.on_guardar = on_guardar
-        self.campos_solo_lectura = set(campos_solo_lectura or [])
-
-        self.title(titulo)
-        self.configure(bg=COLOR_FONDO)
-        self.resizable(False, False)
-        self.transient(parent)
-        self.grab_set()
-
-        cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
-        cont.pack(fill="both", expand=True)
-
-        self.vars = {}
-        for i, campo in enumerate(campos):
-            tk.Label(cont, text=campo.replace("_", " ").upper() + ":",
-                     font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(row=i, column=0, sticky="w", pady=4)
-            var = tk.StringVar(value=str(self.valores.get(campo, "")))
-            estado = "readonly" if campo in self.campos_solo_lectura else "normal"
-            entry = tk.Entry(cont, textvariable=var, width=34, font=FUENTE_NORMAL, state=estado)
-            entry.grid(row=i, column=1, pady=4, padx=(10, 0))
-            self.vars[campo] = var
-
-        botones = tk.Frame(cont, bg=COLOR_FONDO)
-        botones.grid(row=len(campos), column=0, columnspan=2, pady=(16, 0))
-        tk.Button(botones, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
-                   fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
-        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
-
-    def _guardar(self):
-        fila = {campo: var.get() for campo, var in self.vars.items()}
-        if self.on_guardar:
-            self.on_guardar(fila)
-        self.destroy()
-
-
-# ===========================================================================
-# Ventana: editor de datos (CSV) genérico
-# ===========================================================================
-
-class VentanaEditorDatos(tk.Toplevel):
-    """
-    Pantalla para ver y modificar directamente las tablas CSV de:
-    Edificios, Unidades, Inmobiliaria e Historial.
-
-    A propósito NO incluye "numeracion.csv": ese archivo es de uso interno
-    del programa (numeración correlativa de recibos) y no debe editarse
-    a mano para evitar duplicar o saltear números de recibo.
-    """
-
-    def __init__(self, parent, on_cambios=None):
-        super().__init__(parent)
-        self.on_cambios = on_cambios
-        self.title("Editor de datos")
-        self.configure(bg=COLOR_FONDO)
-        self.geometry("920x520")
-        self.transient(parent)
-
-        self._campos_actuales = []
-        self._filas_actuales = []
-
-        top = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=10)
-        top.pack(fill="x")
-
-        tk.Label(top, text="Tabla:", font=FUENTE_BOLD, bg=COLOR_FONDO).pack(side="left")
-        self._tablas = database.listar_tablas_editables()
-        self.var_tabla = tk.StringVar(value=self._tablas[0][1])
-        combo = ttk.Combobox(
-            top, textvariable=self.var_tabla,
-            values=[etiqueta for _clave, etiqueta in self._tablas],
-            state="readonly", width=26,
-        )
-        combo.pack(side="left", padx=8)
-        combo.bind("<<ComboboxSelected>>", lambda e: self._cargar_tabla())
-
-        tk.Button(top, text="+ Agregar fila", command=self._agregar_fila).pack(side="left", padx=6)
-        tk.Button(top, text="Editar fila", command=self._editar_fila).pack(side="left", padx=6)
-        tk.Button(top, text="Eliminar fila", command=self._eliminar_fila).pack(side="left", padx=6)
-        tk.Button(top, text="Recargar", command=self._cargar_tabla).pack(side="left", padx=6)
-
-        aviso = tk.Label(
-            self, bg="#fff6e0", fg="#7a5c00", font=("Segoe UI", 8), anchor="w", justify="left",
-            text=("Los cambios se guardan al instante en la base de datos. "
-                  "Editá con cuidado: por ejemplo, el nombre de un edificio debe escribirse "
-                  "exactamente igual en 'Edificios' y en 'Unidades' para que sigan relacionados."),
-        )
-        aviso.pack(fill="x", padx=16, pady=(0, 6))
-
-        self.tree = ttk.Treeview(self, show="headings", height=18)
-        self.tree.pack(fill="both", expand=True, padx=16, pady=(0, 16))
-        self.tree.bind("<Double-1>", lambda e: self._editar_fila())
-
-        self._clave_actual = None
-        self._cargar_tabla()
-
-    def _clave_de_etiqueta(self, etiqueta):
-        for clave, et in self._tablas:
-            if et == etiqueta:
-                return clave
-        return self._tablas[0][0]
-
-    def _cargar_tabla(self):
-        clave = self._clave_de_etiqueta(self.var_tabla.get())
-        self._clave_actual = clave
-        try:
-            campos, filas = database.leer_tabla(clave)
-        except Exception as e:
-            manejar_error("No se pudo leer la tabla", e)
-            return
-
-        self._campos_actuales = campos
-        self._filas_actuales = filas
-
-        self.tree.delete(*self.tree.get_children())
-        self.tree["columns"] = campos
-        for c in campos:
-            self.tree.heading(c, text=c.upper())
-            ancho = 260 if c in ("inquilino", "nombre", "direccion", "archivo") else 120
-            self.tree.column(c, width=ancho, anchor="w")
-
-        for idx, fila in enumerate(filas):
-            valores = [fila.get(c, "") for c in campos]
-            self.tree.insert("", "end", iid=str(idx), values=valores)
-
-    def _fila_seleccionada_idx(self):
-        seleccion = self.tree.selection()
-        if not seleccion:
-            messagebox.showinfo("Editor de datos", "Seleccioná primero una fila de la lista.")
-            return None
-        return int(seleccion[0])
-
-    def _guardar_y_refrescar(self):
-        def guardar_de_verdad():
-            try:
-                database.guardar_tabla(self._clave_actual, self._filas_actuales)
-            except Exception as e:
-                manejar_error("No se pudo guardar la tabla", e)
-                return
-            mostrar_avisos()
-            self._cargar_tabla()
-            if self.on_cambios:
-                self.on_cambios()
-
-        requerir_maestro(self, guardar_de_verdad)
-
-    def _agregar_fila(self):
-        def al_guardar(fila_nueva):
-            self._filas_actuales.append(fila_nueva)
-            self._guardar_y_refrescar()
-
-        DialogoFilaGenerica(
-            self, f"Agregar fila – {self.var_tabla.get()}",
-            self._campos_actuales, valores=None, on_guardar=al_guardar,
-        )
-
-    def _editar_fila(self):
-        idx = self._fila_seleccionada_idx()
-        if idx is None:
-            return
-        fila_actual = self._filas_actuales[idx]
-
-        def al_guardar(fila_editada):
-            self._filas_actuales[idx] = fila_editada
-            self._guardar_y_refrescar()
-
-        DialogoFilaGenerica(
-            self, f"Editar fila – {self.var_tabla.get()}",
-            self._campos_actuales, valores=fila_actual, on_guardar=al_guardar,
-        )
-
-    def _eliminar_fila(self):
-        idx = self._fila_seleccionada_idx()
-        if idx is None:
-            return
-        if not messagebox.askyesno("Confirmar eliminación",
-                                    "¿Eliminar esta fila? Esta acción no se puede deshacer."):
-            return
-        try:
-            del self._filas_actuales[idx]
-            self._guardar_y_refrescar()
-        except Exception as e:
-            manejar_error("No se pudo eliminar la fila", e)
-
-
-# ===========================================================================
 # Ventana: configuración de la inmobiliaria
 # ===========================================================================
 
@@ -1863,7 +1663,6 @@ class VentanaMails(tk.Toplevel):
         self.combo_edificio.bind("<<ComboboxSelected>>", lambda e: self._cargar())
         tk.Button(top, text="Configuración SMTP", command=self._config_smtp).pack(side="right")
         tk.Button(top, text="Copia (CC)", command=self._editar_copia).pack(side="right", padx=(0, 8))
-        tk.Button(top, text="Registro de envíos", command=self._ver_registro).pack(side="right", padx=(0, 8))
         tk.Button(top, text="Asunto y cuerpo del mail", command=self._editar_plantilla).pack(side="right", padx=(0, 8))
 
         tk.Label(
@@ -1907,9 +1706,6 @@ class VentanaMails(tk.Toplevel):
             messagebox.showwarning("Atención", "Elegí primero un edificio.", parent=self)
             return
         DialogoPlantillaMail(self, edificio)
-
-    def _ver_registro(self):
-        VentanaRegistroEnvios(self, self.var_edificio.get())
 
     def _cargar(self):
         for w in self._interior.winfo_children():
@@ -1977,7 +1773,7 @@ class VentanaRegistroEnvios(tk.Toplevel):
 
     def __init__(self, parent, edificio_inicial=""):
         super().__init__(parent)
-        self.title("Registro de envíos")
+        self.title("Historial de mails")
         self.configure(bg=COLOR_FONDO)
         self.geometry("900x460")
         self.transient(parent)
@@ -2735,6 +2531,7 @@ class App(tk.Tk):
         self._crear_pie()
 
         self._cargar_edificios()
+        self.protocol("WM_DELETE_WINDOW", self._cerrar)
 
     # -----------------------------------------------------------------
     # Construcción de la interfaz
@@ -2748,7 +2545,7 @@ class App(tk.Tk):
         menu_archivo.add_command(label="Cargar desde backup...",
                                  command=lambda: requerir_maestro(self, lambda: VentanaCargarBackup(self)))
         menu_archivo.add_separator()
-        menu_archivo.add_command(label="Salir", command=self.destroy)
+        menu_archivo.add_command(label="Salir", command=self._cerrar)
         menubar.add_cascade(label="Archivo", menu=menu_archivo)
 
         menu_admin = tk.Menu(menubar, tearoff=0)
@@ -2756,13 +2553,12 @@ class App(tk.Tk):
         menu_admin.add_command(label="Configuración de la inmobiliaria", command=self._abrir_configuracion)
         menu_admin.add_command(label="Mailing", command=self._abrir_mails)
         menu_admin.add_separator()
-        menu_admin.add_command(label="Editor de datos", command=self._abrir_editor_datos)
-        menu_admin.add_separator()
         menu_admin.add_command(label="Control maestro", command=self._abrir_control_maestro)
         menubar.add_cascade(label="Administrar", menu=menu_admin)
 
         menu_ver = tk.Menu(menubar, tearoff=0)
         menu_ver.add_command(label="Historial de recibos", command=self._abrir_historial)
+        menu_ver.add_command(label="Historial de mails", command=self._abrir_historial_mails)
         menubar.add_cascade(label="Ver", menu=menu_ver)
 
         menu_ayuda = tk.Menu(menubar, tearoff=0)
@@ -3298,9 +3094,6 @@ class App(tk.Tk):
     def _abrir_configuracion(self):
         requerir_maestro(self, lambda: VentanaConfiguracion(self))
 
-    def _abrir_editor_datos(self):
-        requerir_maestro(self, lambda: VentanaEditorDatos(self, on_cambios=self._refrescar_edificios))
-
     def _abrir_control_maestro(self):
         VentanaControlMaestro(self)
 
@@ -3309,6 +3102,9 @@ class App(tk.Tk):
 
     def _abrir_historial(self):
         VentanaHistorial(self)
+
+    def _abrir_historial_mails(self):
+        VentanaRegistroEnvios(self)
 
     def _hacer_backup(self):
         try:
@@ -3336,6 +3132,18 @@ class App(tk.Tk):
             messagebox.showinfo("Copia de seguridad", f"Copia guardada en:\n\n{destino}")
         except Exception as e:
             manejar_error("No se pudo guardar la copia en ese lugar", e)
+
+    def _cerrar(self):
+        """Al cerrar (la X o Archivo → Salir): backup automático y silencioso, sin preguntar nada."""
+        try:
+            database.crear_backup(automatico=True)
+        except Exception as e:
+            if not messagebox.askyesno(
+                    "Copia de seguridad automática",
+                    f"No se pudo hacer la copia de seguridad automática al cerrar:\n\n{e}\n\n"
+                    "¿Cerrar igual, sin esa copia?"):
+                return
+        self.destroy()
 
     def _mostrar_ayuda_recibos(self):
         VentanaAyudaRecibos(self)

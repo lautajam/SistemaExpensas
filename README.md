@@ -44,8 +44,8 @@ editables.
   editable sin recompilar, con el importe también en letras.
 - Datos del consorcio y del administrador (CUIT, RPAC), datos de la
   inmobiliaria, logo y firma digital.
-- Historial de recibos, editor de tablas, copia de seguridad y archivado de
-  edificios dados de baja.
+- Historial de recibos, copia de seguridad (manual y automática al cerrar) y
+  archivado de edificios dados de baja.
 - Contraseña maestra (hasheada, con pregunta de seguridad) que protege la
   administración de edificios, unidades, la inmobiliaria y los datos.
 - Envío de recibos por mail (con el PDF adjunto) al inquilino y al dueño de
@@ -157,7 +157,7 @@ temporales ni ocultas del sistema. Para un ejecutable en
 | `edificios/<Edificio>/` | PDF de los recibos |
 
 La base es la única fuente de datos: no hay que editar archivos a mano. Para
-ver o cambiar datos, usar **Administrar** y **Administrar → Editor de datos**.
+ver o cambiar datos, usar las pantallas de **Administrar**.
 
 ## 7. Guía de uso
 
@@ -349,12 +349,11 @@ la planilla de pagos; los recibos ya generados y el historial no se modifican.
 
 ### Contraseña maestra
 
-**Administrar edificios/unidades**, **Configuración de la inmobiliaria**,
-**Mailing** y el **Editor de datos** están protegidos por una contraseña
-maestra: la piden para abrir cualquiera de las cuatro pantallas, y la vuelven
-a pedir en cada alta, edición o borrado dentro de ellas. El resto de la
-aplicación (pantalla principal, generar recibos, historial y el botón
-**Enviar por mail**) queda libre.
+**Administrar edificios/unidades**, **Configuración de la inmobiliaria** y
+**Mailing** están protegidos por una contraseña maestra: la piden para abrir
+cualquiera de las tres pantallas, y la vuelven a pedir en cada alta, edición
+o borrado dentro de ellas. El resto de la aplicación (pantalla principal,
+generar recibos, historial y el botón **Enviar por mail**) queda libre.
 
 - **Primera vez:** al abrir cualquiera de esas pantallas sin tener todavía una
   contraseña creada, la aplicación obliga a crear una (con confirmación) junto
@@ -425,15 +424,6 @@ a 1200 px si son muy grandes. El **logo** se imprime arriba a la derecha del
 recibo y la **firma** sobre la línea «Firma»; si no hay imagen
 cargada, ese lugar queda en blanco.
 
-### Editor de datos
-
-**Administrar → Editor de datos** permite ver, agregar, editar y eliminar
-filas de las tablas de Edificios, Unidades, Inmobiliaria e Historial sin salir
-del programa. Los cambios se guardan de inmediato en la base de datos.
-
-La numeración de recibos no aparece en el editor a propósito: la administra el
-programa y su edición manual podría duplicar o saltear números de recibo.
-
 ### Envío de recibos por mail
 
 **Administrar → Mailing** guarda, por edificio, hasta 4 direcciones por unidad
@@ -460,11 +450,18 @@ mail**: manda el PDF adjunto a cada dirección cargada de la unidad de cada
 recibo tildado. Al terminar, muestra cuántos se mandaron y el detalle de los
 que fallaron (por ejemplo, una unidad sin ninguna dirección cargada, o un
 recibo de antes de tener esta función, que no queda vinculado a una unidad).
-Queda un registro de cada envío en la tabla `mails_enviados` de la base de datos.
+Cada envío queda guardado, y se puede ver (y reenviar a una dirección puntual)
+en **Ver → Historial de mails**, con filtro por edificio.
 
-El asunto y el cuerpo del mail son fijos por ahora: «Recibo expensas
-`<Edificio>` - `<Expensas de>`» y un texto que menciona la unidad, el edificio
-y los mismos «Expensas de» / «Gastos de» que figuran en el recibo.
+El botón **Asunto y cuerpo del mail** de Mailing permite personalizar esos dos
+textos por edificio (el predeterminado es «Recibo expensas `<Edificio>` -
+`<Expensas de>»` y un texto que menciona la unidad, el edificio y los mismos
+«Expensas de» / «Gastos de» que figuran en el recibo). Las variables
+disponibles son `{edificio}`, `{unidad}`, `{expensas_de}` y `{gastos_de}`; un
+campo vacío usa el texto predeterminado.
+
+El botón **Copia (CC)** de Mailing permite cargar un mail aparte que recibe
+copia de cada envío, con un tilde para activarlo o desactivarlo sin borrarlo.
 
 ### Historial
 
