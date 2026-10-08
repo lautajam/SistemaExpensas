@@ -70,6 +70,19 @@ def mostrar_avisos():
         messagebox.showwarning("Planilla de pagos", aviso)
 
 
+def ajustar_tamano_minimo(ventana):
+    """
+    Evita que una ventana arranque más chica de lo que sus propios botones y textos necesitan:
+    con una fuente más grande o el escalado de pantalla de Windows (125%, 150%...), un ancho fijo
+    elegido a ojo puede quedar corto y los botones se ven apretados. Se llama al final del
+    __init__, después de armar todos los widgets.
+    """
+    ventana.update_idletasks()
+    ancho = max(ventana.winfo_width(), ventana.winfo_reqwidth())
+    alto = max(ventana.winfo_height(), ventana.winfo_reqheight())
+    ventana.minsize(ancho, alto)
+
+
 # ===========================================================================
 # Contraseña maestra (ver maestro.py): protege abrir Administrar edificios/unidades,
 # Mailing y Configuración de la inmobiliaria, y cada alta/edición/borrado dentro de ellas.
@@ -1117,6 +1130,8 @@ class VentanaAsignarCeldas(tk.Toplevel):
             tk.Label(interior, text="Este edificio todavía no tiene unidades.", bg=COLOR_FONDO,
                      font=FUENTE_NORMAL).grid(row=0, column=0, pady=10)
 
+        ajustar_tamano_minimo(self)
+
     def _guardar(self):
         try:
             celdas = {uid: pagos.normalizar_celda(var.get()) for uid, var in self.vars.items()}
@@ -1215,6 +1230,7 @@ class VentanaAdministracion(tk.Toplevel):
                  fg="#666666", font=("Segoe UI", 8)).pack(side="left", padx=10)
 
         self._unidades_por_iid = {}
+        ajustar_tamano_minimo(self)
         self._recargar()
 
     def _recargar(self):
@@ -1539,7 +1555,7 @@ class DialogoPlantillaMail(tk.Toplevel):
         tk.Entry(cont, textvariable=self.var_asunto, font=FUENTE_NORMAL).pack(fill="x", pady=(2, 10))
 
         tk.Label(cont, text="Cuerpo:", font=FUENTE_NORMAL, bg=COLOR_FONDO).pack(anchor="w")
-        self.texto_cuerpo = tk.Text(cont, font=FUENTE_NORMAL, height=9, wrap="word")
+        self.texto_cuerpo = tk.Text(cont, font=FUENTE_NORMAL, height=9, width=50, wrap="word")
         self.texto_cuerpo.pack(fill="both", expand=True, pady=(2, 6))
 
         tk.Label(
@@ -1561,6 +1577,7 @@ class DialogoPlantillaMail(tk.Toplevel):
         tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="right")
 
         self._cargar()
+        ajustar_tamano_minimo(self)
 
     def _cargar(self):
         asunto, cuerpo = correo.get_plantilla(self.edificio)
@@ -1693,6 +1710,7 @@ class VentanaMails(tk.Toplevel):
 
         self.vars = {}     # unidad_id -> {inquilino1, inquilino2, dueno1, dueno2}: StringVar
         self._cargar()
+        ajustar_tamano_minimo(self)
 
     def _config_smtp(self):
         DialogoConfiguracionSMTP(self)
@@ -1807,6 +1825,7 @@ class VentanaRegistroEnvios(tk.Toplevel):
 
         self._filas_por_iid = {}
         self._recargar()
+        ajustar_tamano_minimo(self)
 
     def _recargar(self):
         for item in self.tree.get_children():
@@ -2135,6 +2154,7 @@ class VentanaHistorial(_AbreRecibosMixin, _EnviarPorMailMixin, tk.Toplevel):
         self._filas_por_iid = {}
         self.seleccionadas = set()
         self._recargar()
+        ajustar_tamano_minimo(self)
 
     def _recargar(self):
         for item in self.tree.get_children():
@@ -2229,6 +2249,7 @@ class VentanaRecibosGenerados(_AbreRecibosMixin, _EnviarPorMailMixin, tk.Topleve
 
         if generados:
             self.tree.selection_set("0")
+        ajustar_tamano_minimo(self)
 
 
 # ===========================================================================
@@ -2460,6 +2481,7 @@ class VentanaCargarBackup(tk.Toplevel):
         tk.Button(pie, text="Elegir otro archivo...", command=self._elegir_archivo,
                   padx=12, pady=4).pack(side="left", padx=8)
         tk.Button(pie, text="Cerrar", command=self.destroy, padx=12, pady=4).pack(side="right")
+        ajustar_tamano_minimo(self)
 
     def _cargar_seleccionado(self):
         seleccion = self.tree.selection()
