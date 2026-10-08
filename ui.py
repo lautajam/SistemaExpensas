@@ -1090,10 +1090,9 @@ class VentanaAsignarCeldas(tk.Toplevel):
             anchor="w", padx=16, pady=(14, 2))
         tk.Label(
             self, bg=COLOR_FONDO, fg="#666666", font=("Segoe UI", 8), justify="left", wraplength=480,
-            text="Escribí, para cada unidad, la celda donde está su nombre en la planilla (ej. B12). "
-                 "Los montos se leen de las 4 celdas de la derecha: Total a pagar, Monto deuda, "
-                 "Monto pagado y Tipo pago. Dejala vacía si la unidad no figura.\n"
-                 f"Archivo: {pagos.ruta_pagos_edificio(edificio)}",
+            text="Escribí, para cada unidad, la celda donde está su nombre en la planilla (ej. B12).\n"
+                 "Los montos se leen de las 4 celdas de la derecha: Total a pagar, Monto deuda, Monto pagado y Tipo pago.\n"
+                 "Dejala vacía si la unidad no figura.\n"
         ).pack(anchor="w", padx=16, pady=(0, 8))
 
         botones = tk.Frame(self, bg=COLOR_FONDO)
@@ -1383,10 +1382,6 @@ class VentanaConfiguracion(tk.Toplevel):
             tk.Button(barra, text="Quitar", command=lambda c=clave: self._quitar_imagen(c)).pack(anchor="w", pady=(4, 0))
             self._mostrar_vista(clave, database.imagen_inmobiliaria(clave))
 
-        tk.Label(cont, text="El logo y la firma se guardan, pero todavía no se usan en los recibos.",
-                 font=("Segoe UI", 8), fg="#666666", bg=COLOR_FONDO).grid(
-            row=len(etiquetas) + 2, column=0, columnspan=2, sticky="w", pady=(4, 0))
-
         botones = tk.Frame(cont, bg=COLOR_FONDO)
         botones.grid(row=len(etiquetas) + 3, column=0, columnspan=2, pady=(16, 0))
         tk.Button(botones, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
@@ -1485,11 +1480,6 @@ class DialogoConfiguracionSMTP(tk.Toplevel):
             tk.Entry(cont, textvariable=var, width=32, font=FUENTE_NORMAL,
                      show="*" if oculto else "").grid(row=i, column=1, pady=4, padx=(10, 0))
             self.vars[clave] = var
-
-        tk.Label(cont, text="El usuario es también la dirección que figura como remitente\n"
-                 "(en Gmail, por ejemplo, usá una contraseña de aplicación).",
-                 font=("Segoe UI", 8), fg="#666666", bg=COLOR_FONDO, justify="left").grid(
-            row=len(campos), column=0, columnspan=2, sticky="w", pady=(0, 6))
 
         tk.Label(cont, text="Seguridad de la conexión:", font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(
             row=len(campos) + 1, column=0, sticky="w", pady=4)
@@ -1684,8 +1674,8 @@ class VentanaMails(tk.Toplevel):
 
         tk.Label(
             self, bg=COLOR_FONDO, fg="#666666", font=("Segoe UI", 8), justify="left", wraplength=720,
-            text="Hasta 2 mails del inquilino y 2 del dueño por unidad. Al enviar un recibo se manda a todos "
-                 "los que estén cargados. Un depto que paga junto con su cochera/baulera usa los mails del depto.",
+            text="Al enviar un recibo se manda a todos los inquilinos y dueños que estén cargados.\n"
+                 "Un depto que paga junto con su cochera/baulera usa los mails del depto.",
         ).pack(anchor="w", padx=16, pady=(0, 6))
 
         botones_masivos = tk.Frame(self, bg=COLOR_FONDO, padx=16)
@@ -2452,7 +2442,7 @@ class VentanaCargarBackup(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
 
-        tk.Label(self, text="Backups guardados (del más nuevo al más viejo):", font=FUENTE_BOLD,
+        tk.Label(self, text="Backups guardados:", font=FUENTE_BOLD,
                  bg=COLOR_FONDO).pack(anchor="w", padx=16, pady=(14, 4))
 
         cont = tk.Frame(self, bg=COLOR_FONDO, padx=16)

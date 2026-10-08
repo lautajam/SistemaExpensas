@@ -3,7 +3,7 @@
 maestro.py
 ----------
 Contraseña maestra que protege las pantallas de administración (Administrar
-edificios/unidades, Configuración de la inmobiliaria y Editor de datos CSV):
+edificios/unidades, Mailing y Configuración de la inmobiliaria):
 abrirlas, y cada alta/edición/borrado dentro de ellas, la piden — salvo que el
 "control maestro" esté activo (se activa una vez, desde el menú Administrar, y
 dura hasta que se bloquee o se cierre el programa).

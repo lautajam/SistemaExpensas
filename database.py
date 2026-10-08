@@ -760,49 +760,6 @@ def set_preferencia(clave, valor):
 
 
 # ---------------------------------------------------------------------------
-# Editor de datos genérico (para la pantalla "Editor de datos (CSV)")
-#
-# A propósito NO incluye "numeracion.csv": ese archivo se administra solo
-# desde get_next_numero() y no debe editarse a mano desde la interfaz.
-# ---------------------------------------------------------------------------
-
-def _tablas_editables():
-    """clave de la pantalla -> (tabla de la base, campos, etiqueta visible)."""
-    return {
-        "edificios": ("edificios", EDIFICIOS_CAMPOS, "Edificios"),
-        "unidades": ("unidades", UNIDADES_CAMPOS, "Unidades"),
-        "inmobiliaria": ("inmobiliaria", INMOBILIARIA_CAMPOS, "Inmobiliaria"),
-        "historial": ("historial", HISTORIAL_CAMPOS, "Historial de recibos"),
-    }
-
-
-def listar_tablas_editables():
-    """Devuelve [(clave_interna, etiqueta_visible), ...] en un orden fijo."""
-    orden = ["edificios", "unidades", "inmobiliaria", "historial"]
-    tablas = _tablas_editables()
-    return [(clave, tablas[clave][2]) for clave in orden]
-
-
-def get_campos_tabla(clave):
-    return list(_tablas_editables()[clave][1])
-
-
-def leer_tabla(clave):
-    """Devuelve (campos, filas) de la tabla indicada, leída desde la base."""
-    tabla, campos, _etiqueta = _tablas_editables()[clave]
-    return list(campos), db.leer(tabla)
-
-
-def guardar_tabla(clave, filas):
-    """Reemplaza por completo el contenido de la tabla indicada con 'filas'."""
-    tabla, _campos, _etiqueta = _tablas_editables()[clave]
-    db.reemplazar(tabla, filas)
-    if clave in ("edificios", "unidades"):
-        for e in get_edificios():
-            _sincronizar_pagos_seguro(e["nombre"])
-
-
-# ---------------------------------------------------------------------------
 # Copia de seguridad
 # ---------------------------------------------------------------------------
 
@@ -828,17 +785,25 @@ def _es_csv_de_tabla(relativa):
     return len(partes) == 2 and partes[0] in ("datos", "configuracion") and partes[1].lower().endswith(".csv")
 
 
-def crear_backup():
+_PREFIJO_BACKUP_MANUAL = "backup_expensas_"
+_PREFIJO_BACKUP_AUTO = "backup_auto_"
+_MAX_BACKUPS_AUTO = 14   # al cerrar el programa: no se acumulan para siempre, pero los manuales nunca se borran solos
+
+
+def crear_backup(automatico=False):
     """
     Genera un .zip en BASE_DIR/backups/ con la base de datos (sin las contraseñas), las planillas,
     la plantilla y los demás archivos de configuración. No incluye los PDF de los recibos.
+    Con automatico=True (al cerrar el programa) usa otro nombre y, después, borra los automáticos
+    más viejos para no acumular sin límite; los backups manuales nunca se borran solos.
     Devuelve la ruta del zip.
     """
     carpeta_backups = os.path.join(config.BASE_DIR, "backups")
     _ensure_dir(carpeta_backups)
 
     fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
-    destino = os.path.join(carpeta_backups, f"backup_expensas_{fecha}.zip")
+    prefijo = _PREFIJO_BACKUP_AUTO if automatico else _PREFIJO_BACKUP_MANUAL
+    destino = os.path.join(carpeta_backups, f"{prefijo}{fecha}.zip")
     temporal = destino + ".tmp"   # se escribe primero aparte: un corte a mitad no deja un zip roto con nombre final
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -860,7 +825,22 @@ def crear_backup():
                         z.write(ruta_completa, relativa)
 
     os.replace(temporal, destino)
+    if automatico:
+        _podar_backups_auto(carpeta_backups)
     return destino
+
+
+def _podar_backups_auto(carpeta_backups):
+    """Deja como máximo _MAX_BACKUPS_AUTO backups automáticos; borra los más viejos."""
+    autos = sorted(
+        (os.path.join(carpeta_backups, f) for f in os.listdir(carpeta_backups)
+         if f.startswith(_PREFIJO_BACKUP_AUTO) and f.lower().endswith(".zip")),
+        key=os.path.getmtime)
+    for ruta in autos[:-_MAX_BACKUPS_AUTO] if len(autos) > _MAX_BACKUPS_AUTO else []:
+        try:
+            os.remove(ruta)
+        except OSError:
+            pass
 
 
 def listar_backups():
