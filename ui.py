@@ -17,6 +17,7 @@ comprensible (messagebox), nunca como un traceback crudo de Python.
 """
 
 import os
+import shutil
 import traceback
 import tkinter as tk
 from datetime import date, datetime
@@ -3312,12 +3313,29 @@ class App(tk.Tk):
     def _hacer_backup(self):
         try:
             ruta = database.crear_backup()
-            messagebox.showinfo(
-                "Copia de seguridad",
-                f"Backup creado correctamente en:\n\n{ruta}\n\n"
-                "No incluye la contraseña maestra, la configuración SMTP ni los PDF de los recibos.")
         except Exception as e:
             manejar_error("No se pudo crear la copia de seguridad", e)
+            return
+
+        messagebox.showinfo(
+            "Copia de seguridad",
+            f"Backup creado correctamente en:\n\n{ruta}\n\n"
+            "No incluye la contraseña maestra, la configuración SMTP ni los PDF de los recibos.")
+
+        if not messagebox.askyesno(
+                "Copia de seguridad",
+                "¿Guardar también una copia en otro lugar (un pendrive, una carpeta en la nube, etc.)?"):
+            return
+        destino = filedialog.asksaveasfilename(
+            title="Guardar copia del backup", initialfile=os.path.basename(ruta),
+            defaultextension=".zip", filetypes=[("Backup (.zip)", "*.zip")])
+        if not destino:
+            return
+        try:
+            shutil.copy(ruta, destino)
+            messagebox.showinfo("Copia de seguridad", f"Copia guardada en:\n\n{destino}")
+        except Exception as e:
+            manejar_error("No se pudo guardar la copia en ese lugar", e)
 
     def _mostrar_ayuda_recibos(self):
         VentanaAyudaRecibos(self)
