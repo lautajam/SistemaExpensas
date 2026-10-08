@@ -40,6 +40,8 @@ MAESTRO_CAMPOS = ["sal_password", "hash_password", "pregunta", "sal_respuesta", 
 SMTP_CAMPOS = ["servidor", "puerto", "usuario", "password", "tls"]
 EMAILS_CAMPOS = ["unidad_id", "inquilino1", "inquilino2", "dueno1", "dueno2"]
 ENVIADOS_CAMPOS = ["fecha", "edificio", "numero_recibo", "unidad", "destinatario", "resultado", "detalle"]
+PLANTILLAS_CAMPOS = ["edificio", "asunto", "cuerpo"]
+COPIA_CAMPOS = ["email", "activa"]
 
 # tabla -> (CSV de origen, campos)
 ESQUEMA = {
@@ -53,6 +55,8 @@ ESQUEMA = {
     "smtp": (config.SMTP_CSV, SMTP_CAMPOS),
     "emails_unidades": (config.EMAILS_UNIDADES_CSV, EMAILS_CAMPOS),
     "mails_enviados": (config.MAILS_ENVIADOS_CSV, ENVIADOS_CAMPOS),
+    "plantillas_mail": (config.PLANTILLAS_MAIL_CSV, PLANTILLAS_CAMPOS),
+    "copia_mail": (config.COPIA_MAIL_CSV, COPIA_CAMPOS),
 }
 
 
@@ -68,6 +72,8 @@ def abrir(ruta=None):
     os.makedirs(os.path.dirname(ruta), exist_ok=True)
     conexion = sqlite3.connect(ruta)
     conexion.row_factory = sqlite3.Row
+    _crear_esquema(conexion)   # por si la base es de una versión anterior y le falta alguna tabla
+    conexion.commit()
     return conexion
 
 

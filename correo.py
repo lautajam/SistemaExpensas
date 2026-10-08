@@ -10,6 +10,8 @@ Los datos viven en la base de datos (ver db.py), en estas tablas:
     emails_unidades   una fila por unidad (por su id), con sus 4 direcciones
     smtp              un solo registro con lo necesario para mandar mails:
                        servidor, puerto, usuario, contraseña y seguridad
+    copia_mail        un mail de copia (CC) para cada envío, que se puede activar o desactivar
+    plantillas_mail   asunto y cuerpo del mail, personalizados por edificio
     mails_enviados    un renglón por cada envío (a quién, cuándo, resultado)
 
 El mail se manda "de" el propio usuario SMTP (no hay nombre/mail de remitente aparte:
@@ -22,6 +24,7 @@ protegido por la contraseña maestra.
 import os
 import re
 import smtplib
+import string
 from datetime import datetime
 from email.message import EmailMessage
 
@@ -32,6 +35,16 @@ from recibo import abreviar_periodo
 EMAILS_CAMPOS = ["unidad_id", "inquilino1", "inquilino2", "dueno1", "dueno2"]
 SMTP_CAMPOS = ["servidor", "puerto", "usuario", "password", "tls"]
 ENVIADOS_CAMPOS = ["fecha", "edificio", "numero_recibo", "unidad", "destinatario", "resultado", "detalle"]
+PLANTILLAS_CAMPOS = ["edificio", "asunto", "cuerpo"]
+
+# Variables que se pueden usar en el asunto y el cuerpo del mail de cada edificio.
+PLACEHOLDERS_PLANTILLA = ("edificio", "unidad", "expensas_de", "gastos_de")
+ASUNTO_DEFECTO = "Recibo expensas {edificio} - {expensas_de}"
+CUERPO_DEFECTO = (
+    "Enviamos el recibo del pago de las expensas de {unidad} del edificio {edificio} "
+    "correspondientes al mes de {expensas_de} gasto de {gastos_de}.\n\n"
+    "Ante cualquier consulta, quedamos a disposición."
+)
 
 _RE_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -134,6 +147,31 @@ def probar_conexion(smtp):
 
 
 # ---------------------------------------------------------------------------
+# Copia (CC) en cada envío: un mail aparte, que se puede activar y desactivar
+# ---------------------------------------------------------------------------
+
+def get_copia():
+    """{"email", "activa"}. 'activa' es "1" o "" (no se manda copia aunque haya un mail cargado)."""
+    filas = db.leer("copia_mail")
+    fila = filas[0] if filas else {}
+    return {"email": fila.get("email") or "", "activa": fila.get("activa") or ""}
+
+
+def guardar_copia(email, activa):
+    """Guarda el mail de copia y si está activo. Lanza ValueError si se activa sin un mail válido."""
+    email = (email or "").strip()
+    if activa and not es_email_valido(email):
+        raise ValueError("Para activar la copia hace falta un mail válido.")
+    db.reemplazar("copia_mail", [{"email": email, "activa": "1" if activa else ""}])
+
+
+def obtener_cc():
+    """El mail a copiar en cada envío, o None si está desactivada o no hay ninguno cargado."""
+    copia = get_copia()
+    return copia["email"] if copia["activa"] and copia["email"] else None
+
+
+# ---------------------------------------------------------------------------
 # Texto del mail
 # ---------------------------------------------------------------------------
 
@@ -151,29 +189,66 @@ def _descripcion_unidad(fila_historial):
     return f"{principal}, " + " y ".join(resto) if len(resto) > 1 else f"{principal} y {resto[0]}"
 
 
-def construir_mensaje(fila_historial, edificio):
-    """(asunto, cuerpo) del mail para un renglón del historial."""
-    unidad_txt = _descripcion_unidad(fila_historial)
-    expensas_de = abreviar_periodo(fila_historial.get("expensas_de", ""))
-    gastos_de = abreviar_periodo(fila_historial.get("gastos_de", ""))
-    asunto = f"Recibo expensas {edificio} - {expensas_de}"
-    cuerpo = (
-        f"Enviamos el recibo del pago de las expensas de {unidad_txt} del edificio {edificio} "
-        f"correspondientes al mes de {expensas_de} gasto de {gastos_de}.\n\n"
-        "Ante cualquier consulta, quedamos a disposición."
-    )
+def _validar_plantilla(texto):
+    """Lanza ValueError si el texto usa una variable que no es una de PLACEHOLDERS_PLANTILLA."""
+    if not texto:
+        return
+    try:
+        nombres = [campo for _lit, campo, _spec, _conv in string.Formatter().parse(texto) if campo]
+    except ValueError as e:   # ej. una "{" sin cerrar
+        raise ValueError(f"El texto no es válido: {e}") from None
+    desconocidas = sorted(set(nombres) - set(PLACEHOLDERS_PLANTILLA))
+    if desconocidas:
+        raise ValueError(
+            "No se reconoce: {" + "}, {".join(desconocidas) + "}.\n"
+            "Las variables disponibles son: {" + "}, {".join(PLACEHOLDERS_PLANTILLA) + "}.")
+
+
+def get_plantilla(edificio):
+    """(asunto, cuerpo) del edificio: lo que haya guardado, o el texto predeterminado si no se cargó nada."""
+    fila = next((f for f in db.leer("plantillas_mail") if f["edificio"] == edificio), None)
+    asunto = (fila.get("asunto") if fila else "") or ASUNTO_DEFECTO
+    cuerpo = (fila.get("cuerpo") if fila else "") or CUERPO_DEFECTO
     return asunto, cuerpo
+
+
+def set_plantilla(edificio, asunto, cuerpo):
+    """
+    Guarda el asunto y el cuerpo del mail de un edificio. Un campo vacío usa el predeterminado.
+    Lanza ValueError si usan una variable que no existe.
+    """
+    asunto, cuerpo = (asunto or "").strip(), (cuerpo or "").strip()
+    _validar_plantilla(asunto)
+    _validar_plantilla(cuerpo)
+    filas = [f for f in db.leer("plantillas_mail") if f["edificio"] != edificio]
+    if asunto or cuerpo:
+        filas.append({"edificio": edificio, "asunto": asunto, "cuerpo": cuerpo})
+    db.reemplazar("plantillas_mail", filas)
+
+
+def construir_mensaje(fila_historial, edificio):
+    """(asunto, cuerpo) del mail para un renglón del historial, con la plantilla del edificio."""
+    variables = {
+        "edificio": edificio,
+        "unidad": _descripcion_unidad(fila_historial),
+        "expensas_de": abreviar_periodo(fila_historial.get("expensas_de", "")),
+        "gastos_de": abreviar_periodo(fila_historial.get("gastos_de", "")),
+    }
+    asunto, cuerpo = get_plantilla(edificio)
+    return asunto.format(**variables), cuerpo.format(**variables)
 
 
 # ---------------------------------------------------------------------------
 # Envío
 # ---------------------------------------------------------------------------
 
-def enviar_mail(smtp, destinatario, asunto, cuerpo, ruta_adjunto):
-    """Manda un único mail con el PDF adjunto. Devuelve (ok, mensaje_de_error_o_None)."""
+def enviar_mail(smtp, destinatario, asunto, cuerpo, ruta_adjunto, cc=None):
+    """Manda un único mail con el PDF adjunto, con copia a 'cc' si se pasa. Devuelve (ok, mensaje_de_error_o_None)."""
     msg = EmailMessage()
     msg["From"] = smtp["usuario"]
     msg["To"] = destinatario
+    if cc and es_email_valido(cc) and cc.strip().lower() != destinatario.strip().lower():
+        msg["Cc"] = cc.strip()
     msg["Subject"] = asunto
     msg.set_content(cuerpo)
 
@@ -207,15 +282,12 @@ def registrar_envio(edificio, fila_historial, destinatario, ok, detalle=""):
     })
 
 
-def enviar_recibo(fila_historial):
+def enviar_recibo(fila_historial, cc=None):
     """
     Manda el recibo de un renglón del historial a todas las direcciones cargadas para su
-    unidad. Devuelve una lista de (destinatario, ok, detalle) — una entrada por cada intento
-    (o un único ("(sin datos)", False, motivo) si no se pudo intentar nada).
+    unidad, con copia a 'cc' si se pasa. Devuelve una lista de (destinatario, ok, detalle) —
+    una entrada por cada intento (o un único ("(sin datos)", False, motivo) si no se pudo intentar nada).
     """
-    edificio = fila_historial.get("edificio", "")
-    resultados = []
-
     if not existe_smtp():
         return [("(smtp)", False, "No hay una configuración SMTP cargada (Administrar → Mailing → Configuración SMTP).")]
 
@@ -227,18 +299,39 @@ def enviar_recibo(fila_historial):
     if not destinos:
         return [("(sin mails)", False, "Esta unidad no tiene ninguna dirección de mail cargada.")]
 
+    resultados = []
+    for destinatario in destinos:
+        ok, detalle = reenviar(fila_historial, destinatario, cc=cc)
+        resultados.append((destinatario, ok, detalle))
+    return resultados
+
+
+def reenviar(fila_historial, destinatario, cc=None):
+    """
+    Manda (o vuelve a mandar) el recibo de un renglón del historial a una única dirección, con
+    copia a 'cc' si se pasa. Queda registrado en el historial de envíos como un envío más.
+    Devuelve (ok, detalle).
+    """
+    edificio = fila_historial.get("edificio", "")
+    if not existe_smtp():
+        return False, "No hay una configuración SMTP cargada (Administrar → Mailing → Configuración SMTP)."
+
     ruta_adjunto = os.path.join(config.BASE_DIR, fila_historial.get("archivo", ""))
     if not os.path.isfile(ruta_adjunto):
         detalle = f"No se encontró el PDF: {ruta_adjunto}"
-        for destinatario in destinos:
-            registrar_envio(edificio, fila_historial, destinatario, False, detalle)
-            resultados.append((destinatario, False, detalle))
-        return resultados
+        registrar_envio(edificio, fila_historial, destinatario, False, detalle)
+        return False, detalle
 
     smtp = get_smtp()
     asunto, cuerpo = construir_mensaje(fila_historial, edificio)
-    for destinatario in destinos:
-        ok, detalle = enviar_mail(smtp, destinatario, asunto, cuerpo, ruta_adjunto)
-        registrar_envio(edificio, fila_historial, destinatario, ok, detalle or "")
-        resultados.append((destinatario, ok, detalle))
-    return resultados
+    ok, detalle = enviar_mail(smtp, destinatario, asunto, cuerpo, ruta_adjunto, cc=cc)
+    registrar_envio(edificio, fila_historial, destinatario, ok, detalle or "")
+    return ok, detalle
+
+
+def get_mails_enviados(edificio=None):
+    """Registro de envíos, del más nuevo al más viejo. Con 'edificio', solo los de ese edificio."""
+    filas = db.leer("mails_enviados")
+    if edificio:
+        filas = [f for f in filas if f.get("edificio") == edificio]
+    return list(reversed(filas))
