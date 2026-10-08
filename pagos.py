@@ -34,6 +34,7 @@ from datetime import datetime
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, Side
+from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import column_index_from_string, coordinate_from_string
 
 import config
@@ -284,6 +285,62 @@ def _calcular_estado(total, deuda, pagado):
     if pagado >= total + deuda:
         return "Total"
     return "A cta."
+
+
+def crear_planilla_en_blanco(nombre_edificio, unidades):
+    """
+    Rearma una planilla propia (modo celdas) que falta, en blanco. El nombre de cada unidad va en su
+    celda y, a la derecha, Total a pagar, Monto deuda, Monto pagado y Tipo pago, con el mismo formato
+    que las planillas automáticas. Si todas las unidades usan la misma columna, arriba de la primera
+    fila va el título (nombre del edificio) y los encabezados, como en la planilla automática.
+    Los montos anteriores no se recuperan. Solo están las unidades con celda asignada.
+    """
+    ruta = ruta_pagos_edificio(nombre_edificio)
+    os.makedirs(config.PAGOS_DIR, exist_ok=True)
+    por_id = indice_por_id(unidades)
+    fuente, fuente_b = Font(name="Arial"), Font(name="Arial", bold=True)
+    centro = Alignment(horizontal="center", vertical="center")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Hoja 1"
+    posiciones = []   # (unidad, fila, columna del nombre)
+    for u in unidades:
+        celda = str(u.get("celda") or "").strip()
+        if celda:
+            columna, fila = coordinate_from_string(celda)
+            posiciones.append((u, fila, column_index_from_string(columna)))
+
+    for u, fila, c0 in posiciones:
+        total, deuda, pagado = (get_column_letter(c0 + i) for i in (1, 2, 3))
+        formula = (f'=IF({pagado}{fila}=0,"No pagado",IF({pagado}{fila}={deuda}{fila},"Deuda",'
+                   f'IF({pagado}{fila}>={total}{fila}+{deuda}{fila},"Total","A cta.")))')
+        for i, valor in enumerate([etiqueta_unidad(u, por_id), None, None, None, formula]):
+            c = ws.cell(fila, c0 + i, valor)
+            c.font, c.alignment, c.border = fuente, centro, _borde()
+            if 1 <= i <= 3:
+                c.number_format = "#,##0.00"
+        ws.column_dimensions[get_column_letter(c0)].width = 22
+        for i in range(1, 5):
+            ws.column_dimensions[get_column_letter(c0 + i)].width = 17
+
+    columnas = {c0 for _u, _f, c0 in posiciones}
+    primera = min((f for _u, f, _c in posiciones), default=0)
+    if len(columnas) == 1 and primera >= 3:   # título y encabezados en las dos filas de arriba
+        c0 = columnas.pop()
+        fila_titulo, fila_encabezado = primera - 2, primera - 1
+        ws.merge_cells(start_row=fila_titulo, start_column=c0, end_row=fila_titulo, end_column=c0 + 4)
+        titulo = ws.cell(fila_titulo, c0, nombre_edificio)
+        titulo.font, titulo.alignment = fuente_b, centro
+        for i in range(5):
+            ws.cell(fila_titulo, c0 + i).border = _borde()
+            encabezado = ws.cell(fila_encabezado, c0 + i, ENCABEZADOS[i])
+            encabezado.font, encabezado.alignment, encabezado.border = fuente_b, centro, _borde()
+
+    temporal = ruta + ".tmp"
+    wb.save(temporal)
+    os.replace(temporal, ruta)
+    return ruta
 
 
 def planilla_abierta(nombre_edificio):

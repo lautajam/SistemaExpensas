@@ -53,6 +53,8 @@ MAESTRO_CSV = os.path.join(CONFIG_DIR, "maestro.csv")
 EMAILS_UNIDADES_CSV = os.path.join(DATOS_DIR, "emails_unidades.csv")
 SMTP_CSV = os.path.join(CONFIG_DIR, "smtp.csv")
 MAILS_ENVIADOS_CSV = os.path.join(DATOS_DIR, "mails_enviados.csv")
+PLANTILLAS_MAIL_CSV = os.path.join(CONFIG_DIR, "plantillas_mail.csv")
+COPIA_MAIL_CSV = os.path.join(CONFIG_DIR, "copia_mail.csv")
 
 # Imágenes de la inmobiliaria (se guardan siempre como PNG en configuracion/)
 IMAGENES_INMOBILIARIA = {

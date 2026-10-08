@@ -9,22 +9,17 @@ abrirlas, y cada alta/edición/borrado dentro de ellas, la piden — salvo que e
 dura hasta que se bloquee o se cierre el programa).
 
 Se guarda hasheada (PBKDF2-SHA256 con sal aleatoria, sin depender de librerías
-externas) en configuracion/maestro.csv, junto con una pregunta de seguridad para
-poder restablecerla si se olvida. Por ahora es un solo registro en un CSV; está
-pensado para pasar a una base de datos más adelante sin cambiar esta interfaz
-(crear/verificar_password/verificar_respuesta/etc.), así que el resto de la app
-no debería necesitar cambios cuando eso pase.
+externas) en la tabla "maestro" de la base de datos, junto con una pregunta de
+seguridad para poder restablecerla si se olvida.
 """
 
-import csv
 import os
 import re
 import unicodedata
 from hashlib import pbkdf2_hmac
 
-import config
+import db
 
-_CAMPOS = ["sal_password", "hash_password", "pregunta", "sal_respuesta", "hash_respuesta"]
 _ITERACIONES = 200_000
 
 # Control maestro: True mientras la sesión lo mantenga desbloqueado (no se guarda en disco:
@@ -46,14 +41,11 @@ def _normalizar(texto):
 
 def existe():
     """True si ya se configuró una contraseña maestra."""
-    return os.path.isfile(config.MAESTRO_CSV)
+    return bool(db.leer("maestro"))
 
 
 def _leer():
-    if not existe():
-        return None
-    with open(config.MAESTRO_CSV, "r", encoding="utf-8-sig", newline="") as f:
-        filas = list(csv.DictReader(f))
+    filas = db.leer("maestro")
     return filas[0] if filas else None
 
 
@@ -72,14 +64,8 @@ def crear(password, pregunta, respuesta):
 
     sal_pw, hash_pw = _hash(password)
     sal_resp, hash_resp = _hash(_normalizar(respuesta))
-    os.makedirs(os.path.dirname(config.MAESTRO_CSV), exist_ok=True)
-    temporal = config.MAESTRO_CSV + ".tmp"
-    with open(temporal, "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=_CAMPOS)
-        w.writeheader()
-        w.writerow({"sal_password": sal_pw, "hash_password": hash_pw, "pregunta": pregunta,
-                    "sal_respuesta": sal_resp, "hash_respuesta": hash_resp})
-    os.replace(temporal, config.MAESTRO_CSV)
+    db.reemplazar("maestro", [{"sal_password": sal_pw, "hash_password": hash_pw, "pregunta": pregunta,
+                               "sal_respuesta": sal_resp, "hash_respuesta": hash_resp}])
 
 
 def verificar_password(password):

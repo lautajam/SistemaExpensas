@@ -17,6 +17,7 @@ comprensible (messagebox), nunca como un traceback crudo de Python.
 """
 
 import os
+import shutil
 import traceback
 import tkinter as tk
 from datetime import date, datetime
@@ -136,8 +137,7 @@ class DialogoCrearMaestro(tk.Toplevel):
 
         tk.Label(
             cont, justify="left", font=("Segoe UI", 8), fg="#666666", bg=COLOR_FONDO,
-            text="Guardala bien: si la olvidás, se restablece con la pregunta de seguridad\n"
-                 "(o borrando configuracion/maestro.csv con el programa cerrado).",
+            text="Guardala bien: si la olvidás, se restablece con la pregunta de seguridad.",
         ).grid(row=len(campos) + 1, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         botones = tk.Frame(cont, bg=COLOR_FONDO)
@@ -593,8 +593,9 @@ class DialogoUnidad(tk.Toplevel):
         entrada_fila(7, self.var_dueno)
         etiqueta_fila(8, "Inquilino:")
         entrada_fila(8, self.var_inquilino)
-        etiqueta_fila(9, "Importe:")
-        entrada_fila(9, self.var_importe)
+        if not self.unidad:   # al editar, el importe no se toca acá: se carga desde la planilla de pagos
+            etiqueta_fila(9, "Importe:")
+            entrada_fila(9, self.var_importe)
 
         self.frame_asociadas = tk.Frame(cont, bg=COLOR_FONDO)
         self.frame_asociadas.grid(row=10, column=0, columnspan=2, sticky="we", pady=(10, 0))
@@ -797,7 +798,7 @@ class DialogoUnidad(tk.Toplevel):
                     database.update_unidad(
                         self.unidad["id"],
                         piso=piso, tipo=tipo, unidad=unidad_txt, uf=uf, dueno=dueno,
-                        inquilino=inquilino, importe=str(importe), depto_id=depto_id,
+                        inquilino=inquilino, depto_id=depto_id,
                         paga_junto=modo, celda=celda,
                     )
                     depto_propio = self.unidad["id"]
@@ -1380,7 +1381,7 @@ class VentanaEditorDatos(tk.Toplevel):
     def __init__(self, parent, on_cambios=None):
         super().__init__(parent)
         self.on_cambios = on_cambios
-        self.title("Editor de datos (CSV)")
+        self.title("Editor de datos")
         self.configure(bg=COLOR_FONDO)
         self.geometry("920x520")
         self.transient(parent)
@@ -1409,7 +1410,7 @@ class VentanaEditorDatos(tk.Toplevel):
 
         aviso = tk.Label(
             self, bg="#fff6e0", fg="#7a5c00", font=("Segoe UI", 8), anchor="w", justify="left",
-            text=("Los cambios se guardan al instante en el archivo CSV correspondiente. "
+            text=("Los cambios se guardan al instante en la base de datos. "
                   "Editá con cuidado: por ejemplo, el nombre de un edificio debe escribirse "
                   "exactamente igual en 'Edificios' y en 'Unidades' para que sigan relacionados."),
         )
@@ -1717,6 +1718,129 @@ class DialogoConfiguracionSMTP(tk.Toplevel):
         requerir_maestro(self, guardar_de_verdad)
 
 
+class DialogoPlantillaMail(tk.Toplevel):
+    """Asunto y cuerpo del mail de un edificio. Vacío = usa el predeterminado."""
+
+    def __init__(self, parent, edificio, on_guardado=None):
+        super().__init__(parent)
+        self.edificio = edificio
+        self.on_guardado = on_guardado
+        self.title(f"Asunto y cuerpo del mail - {edificio}")
+        self.configure(bg=COLOR_FONDO)
+        self.geometry("520x420")
+        self.transient(parent)
+        self.grab_set()
+
+        cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
+        cont.pack(fill="both", expand=True)
+
+        tk.Label(cont, text="Asunto:", font=FUENTE_NORMAL, bg=COLOR_FONDO).pack(anchor="w")
+        self.var_asunto = tk.StringVar()
+        tk.Entry(cont, textvariable=self.var_asunto, font=FUENTE_NORMAL).pack(fill="x", pady=(2, 10))
+
+        tk.Label(cont, text="Cuerpo:", font=FUENTE_NORMAL, bg=COLOR_FONDO).pack(anchor="w")
+        self.texto_cuerpo = tk.Text(cont, font=FUENTE_NORMAL, height=9, wrap="word")
+        self.texto_cuerpo.pack(fill="both", expand=True, pady=(2, 6))
+
+        tk.Label(
+            cont, justify="left", font=("Segoe UI", 8), fg="#666666", bg=COLOR_FONDO,
+            text="Variables disponibles: {edificio}, {unidad}, {expensas_de}, {gastos_de}.\n"
+                 "«unidad» es lo que se pagó (ej. «1 A y Cochera 6»); los períodos van abreviados, "
+                 "igual que en el recibo.",
+        ).pack(anchor="w", pady=(0, 8))
+
+        self.lbl_estado = tk.Label(cont, text="", font=("Segoe UI", 8), fg="#b3261e", bg=COLOR_FONDO,
+                                   justify="left", wraplength=470)
+        self.lbl_estado.pack(anchor="w")
+
+        botones = tk.Frame(cont, bg=COLOR_FONDO)
+        botones.pack(fill="x", pady=(8, 0))
+        tk.Button(botones, text="Restablecer predeterminado", command=self._restablecer).pack(side="left")
+        tk.Button(botones, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
+                  fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="right", padx=(6, 0))
+        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="right")
+
+        self._cargar()
+
+    def _cargar(self):
+        asunto, cuerpo = correo.get_plantilla(self.edificio)
+        self.var_asunto.set(asunto)
+        self.texto_cuerpo.delete("1.0", "end")
+        self.texto_cuerpo.insert("1.0", cuerpo)
+
+    def _restablecer(self):
+        self.var_asunto.set(correo.ASUNTO_DEFECTO)
+        self.texto_cuerpo.delete("1.0", "end")
+        self.texto_cuerpo.insert("1.0", correo.CUERPO_DEFECTO)
+
+    def _guardar(self):
+        asunto = self.var_asunto.get().strip()
+        cuerpo = self.texto_cuerpo.get("1.0", "end").strip()
+
+        def guardar_de_verdad():
+            try:
+                correo.set_plantilla(self.edificio, asunto, cuerpo)
+            except ValueError as e:
+                self.lbl_estado.config(text=str(e))
+                return
+            self.destroy()
+            if self.on_guardado:
+                self.on_guardado()
+
+        requerir_maestro(self, guardar_de_verdad)
+
+
+class DialogoCopiaMail(tk.Toplevel):
+    """Un mail de copia (CC) para cada envío, que se puede activar o desactivar sin borrarlo."""
+
+    def __init__(self, parent, on_guardado=None):
+        super().__init__(parent)
+        self.on_guardado = on_guardado
+        self.title("Copia (CC)")
+        self.configure(bg=COLOR_FONDO)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        cont = tk.Frame(self, bg=COLOR_FONDO, padx=20, pady=16)
+        cont.pack(fill="both", expand=True)
+
+        datos = correo.get_copia()
+        tk.Label(cont, text="Mail de copia:", font=FUENTE_NORMAL, bg=COLOR_FONDO).grid(row=0, column=0, sticky="w")
+        self.var_email = tk.StringVar(value=datos["email"])
+        tk.Entry(cont, textvariable=self.var_email, width=32, font=FUENTE_NORMAL).grid(
+            row=0, column=1, pady=4, padx=(10, 0))
+
+        self.var_activa = tk.BooleanVar(value=bool(datos["activa"]))
+        tk.Checkbutton(cont, text="Mandar copia a este mail en cada envío", variable=self.var_activa,
+                       bg=COLOR_FONDO, font=FUENTE_NORMAL).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        self.lbl_estado = tk.Label(cont, text="", font=("Segoe UI", 8), fg="#b3261e", bg=COLOR_FONDO,
+                                   wraplength=300, justify="left")
+        self.lbl_estado.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+        botones = tk.Frame(cont, bg=COLOR_FONDO)
+        botones.grid(row=3, column=0, columnspan=2, pady=(14, 0))
+        tk.Button(botones, text="Guardar", command=self._guardar, bg=COLOR_PRIMARIO,
+                  fg="white", font=FUENTE_BOLD, padx=14, pady=4).pack(side="left", padx=6)
+        tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
+
+    def _guardar(self):
+        email, activa = self.var_email.get().strip(), self.var_activa.get()
+
+        def guardar_de_verdad():
+            try:
+                correo.guardar_copia(email, activa)
+            except ValueError as e:
+                self.lbl_estado.config(text=str(e))
+                return
+            self.destroy()
+            if self.on_guardado:
+                self.on_guardado()
+
+        requerir_maestro(self, guardar_de_verdad)
+
+
 class VentanaMails(tk.Toplevel):
     """Direcciones de mail (inquilino y dueño) de cada unidad de un edificio, para enviar recibos."""
 
@@ -1738,6 +1862,9 @@ class VentanaMails(tk.Toplevel):
         self.combo_edificio.pack(side="left", padx=8)
         self.combo_edificio.bind("<<ComboboxSelected>>", lambda e: self._cargar())
         tk.Button(top, text="Configuración SMTP", command=self._config_smtp).pack(side="right")
+        tk.Button(top, text="Copia (CC)", command=self._editar_copia).pack(side="right", padx=(0, 8))
+        tk.Button(top, text="Registro de envíos", command=self._ver_registro).pack(side="right", padx=(0, 8))
+        tk.Button(top, text="Asunto y cuerpo del mail", command=self._editar_plantilla).pack(side="right", padx=(0, 8))
 
         tk.Label(
             self, bg=COLOR_FONDO, fg="#666666", font=("Segoe UI", 8), justify="left", wraplength=720,
@@ -1770,6 +1897,19 @@ class VentanaMails(tk.Toplevel):
 
     def _config_smtp(self):
         DialogoConfiguracionSMTP(self)
+
+    def _editar_copia(self):
+        DialogoCopiaMail(self)
+
+    def _editar_plantilla(self):
+        edificio = self.var_edificio.get()
+        if not edificio:
+            messagebox.showwarning("Atención", "Elegí primero un edificio.", parent=self)
+            return
+        DialogoPlantillaMail(self, edificio)
+
+    def _ver_registro(self):
+        VentanaRegistroEnvios(self, self.var_edificio.get())
 
     def _cargar(self):
         for w in self._interior.winfo_children():
@@ -1830,6 +1970,86 @@ class VentanaMails(tk.Toplevel):
             self.destroy()
 
         requerir_maestro(self, guardar_de_verdad)
+
+
+class VentanaRegistroEnvios(tk.Toplevel):
+    """Lista de mails enviados, con filtro por edificio y reenvío a una dirección puntual."""
+
+    def __init__(self, parent, edificio_inicial=""):
+        super().__init__(parent)
+        self.title("Registro de envíos")
+        self.configure(bg=COLOR_FONDO)
+        self.geometry("900x460")
+        self.transient(parent)
+
+        top = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=10)
+        top.pack(fill="x")
+        tk.Label(top, text="Filtrar por edificio:", font=FUENTE_BOLD, bg=COLOR_FONDO).pack(side="left")
+        self.var_filtro = tk.StringVar(value=edificio_inicial or "(Todos)")
+        combo = ttk.Combobox(top, textvariable=self.var_filtro,
+                             values=["(Todos)"] + database.get_nombres_edificios(), state="readonly", width=28)
+        combo.pack(side="left", padx=8)
+        combo.bind("<<ComboboxSelected>>", lambda e: self._recargar())
+
+        columnas = ("fecha", "edificio", "numero_recibo", "unidad", "destinatario", "resultado", "detalle")
+        titulos = {"fecha": "Fecha", "edificio": "Edificio", "numero_recibo": "N°", "unidad": "Unidad",
+                   "destinatario": "Destinatario", "resultado": "Resultado", "detalle": "Detalle"}
+        anchos = {"fecha": 110, "edificio": 140, "numero_recibo": 55, "unidad": 140,
+                  "destinatario": 180, "resultado": 80, "detalle": 220}
+        self.tree = ttk.Treeview(self, columns=columnas, show="headings", height=16, selectmode="browse")
+        for c in columnas:
+            self.tree.heading(c, text=titulos[c])
+            self.tree.column(c, width=anchos[c], anchor="center" if c in ("resultado", "numero_recibo") else "w")
+        self.tree.tag_configure("error", foreground="#b3261e")
+        self.tree.pack(fill="both", expand=True, padx=16, pady=(4, 8))
+
+        pie = tk.Frame(self, bg=COLOR_FONDO, padx=16)
+        pie.pack(fill="x", pady=(0, 12))
+        tk.Button(pie, text="Reenviar", command=self._reenviar, bg="#1f7a3d", fg="white",
+                  font=FUENTE_BOLD, padx=12, pady=4).pack(side="left")
+        tk.Button(pie, text="Cerrar", command=self.destroy, padx=12, pady=4).pack(side="right")
+
+        self._filas_por_iid = {}
+        self._recargar()
+
+    def _recargar(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self._filas_por_iid = {}
+        filtro = self.var_filtro.get()
+        registro = correo.get_mails_enviados(None if filtro in ("", "(Todos)") else filtro)
+        for i, r in enumerate(registro):
+            iid = str(i)
+            tag = ("error",) if r.get("resultado") != "OK" else ()
+            self.tree.insert("", "end", iid=iid, values=(
+                r.get("fecha", ""), r.get("edificio", ""), r.get("numero_recibo", ""), r.get("unidad", ""),
+                r.get("destinatario", ""), r.get("resultado", ""), r.get("detalle", ""),
+            ), tags=tag)
+            self._filas_por_iid[iid] = r
+
+    def _reenviar(self):
+        seleccion = self.tree.selection()
+        if not seleccion:
+            messagebox.showinfo("Reenviar", "Seleccioná primero un envío de la lista.", parent=self)
+            return
+        r = self._filas_por_iid[seleccion[0]]
+        fila_historial = next(
+            (h for h in database.get_historial()
+             if h.get("edificio") == r.get("edificio") and h.get("numero_recibo") == r.get("numero_recibo")), None)
+        if fila_historial is None:
+            messagebox.showwarning(
+                "Reenviar", "No encuentro el recibo de este envío en el historial (¿se borró el edificio?).",
+                parent=self)
+            return
+        if not messagebox.askyesno(
+                "Reenviar", f"¿Reenviar el recibo N° {r['numero_recibo']} a {r['destinatario']}?", parent=self):
+            return
+        ok, detalle = correo.reenviar(fila_historial, r["destinatario"], cc=correo.obtener_cc())
+        if ok:
+            messagebox.showinfo("Reenviar", "Reenviado correctamente.", parent=self)
+        else:
+            messagebox.showwarning("Reenviar", f"No se pudo reenviar: {detalle}", parent=self)
+        self._recargar()
 
 
 # ===========================================================================
@@ -2038,10 +2258,11 @@ class _EnviarPorMailMixin:
                 parent=self)
             return
 
+        cc = correo.obtener_cc()
         detalle, enviados, fallidos = [], 0, 0
         for iid in elegidas:
             fila = self._filas_por_iid[iid]
-            resultados = correo.enviar_recibo(fila)
+            resultados = correo.enviar_recibo(fila, cc=cc)
             etiqueta = f"{fila.get('piso', '')} {fila.get('unidad', '')}".strip()
             for destinatario, ok, error in resultados:
                 if ok:
@@ -2535,7 +2756,7 @@ class App(tk.Tk):
         menu_admin.add_command(label="Configuración de la inmobiliaria", command=self._abrir_configuracion)
         menu_admin.add_command(label="Mailing", command=self._abrir_mails)
         menu_admin.add_separator()
-        menu_admin.add_command(label="Editor de datos (CSV)", command=self._abrir_editor_datos)
+        menu_admin.add_command(label="Editor de datos", command=self._abrir_editor_datos)
         menu_admin.add_separator()
         menu_admin.add_command(label="Control maestro", command=self._abrir_control_maestro)
         menubar.add_cascade(label="Administrar", menu=menu_admin)
@@ -2625,7 +2846,6 @@ class App(tk.Tk):
         scrollbar.pack(side="right", fill="y")
 
         self.tree.bind("<Button-1>", self._click_en_tabla)
-        self.tree.bind("<Double-1>", self._doble_click_en_tabla)
 
     def _crear_pie(self):
         pie = tk.Frame(self, bg=COLOR_FONDO, padx=16, pady=10)
@@ -2766,17 +2986,6 @@ class App(tk.Tk):
         if columna == self._col_sel:  # columna de selección
             self._alternar_seleccion(fila)
 
-    def _doble_click_en_tabla(self, event):
-        fila = self.tree.identify_row(event.y)
-        columna = self.tree.identify_column(event.x)
-        if not fila:
-            return
-        if columna == self._col_sel:
-            return  # ya se maneja como clic simple
-        unidad = self._unidades_por_iid.get(fila)
-        if unidad:
-            DialogoUnidad(self, self.var_edificio.get(), unidad=unidad, on_guardar=self._recargar_unidades)
-
     def _marcar(self, iid, marcar):
         (self.seleccionadas.add if marcar else self.seleccionadas.discard)(iid)
         valores = list(self.tree.item(iid, "values"))
@@ -2857,14 +3066,25 @@ class App(tk.Tk):
         if not edificio:
             messagebox.showwarning("Atención", "Seleccioná un edificio.")
             return
+        ruta = pagos.ruta_pagos_edificio(edificio)
+        unidades = database.get_unidades_por_edificio(edificio)
+        faltaba = not os.path.isfile(ruta)
         try:
-            database.sincronizar_pagos(edificio)
+            if faltaba and pagos.modo_celdas(unidades):
+                pagos.crear_planilla_en_blanco(edificio, unidades)   # planilla propia: se rearma en sus celdas
+            else:
+                database.sincronizar_pagos(edificio)                 # automática: la crea si no existe
         except PermissionError:
             pass  # ya está abierta: se abre/muestra tal como está
         except Exception as e:
             manejar_error("No se pudo preparar la planilla de pagos", e)
             return
-        ok, mensaje = abrir_pdf(pagos.ruta_pagos_edificio(edificio))
+        if faltaba and os.path.isfile(ruta):
+            messagebox.showinfo(
+                "Planilla de pagos",
+                f"La planilla de «{edificio}» faltaba: se rearmó en blanco.\n\n"
+                "Los montos anteriores no están: hay que cargarlos de nuevo.")
+        ok, mensaje = abrir_pdf(ruta)
         if not ok:
             messagebox.showinfo("Planilla de pagos", mensaje)
 
@@ -3093,12 +3313,29 @@ class App(tk.Tk):
     def _hacer_backup(self):
         try:
             ruta = database.crear_backup()
-            messagebox.showinfo(
-                "Copia de seguridad",
-                f"Backup creado correctamente en:\n\n{ruta}\n\n"
-                "No incluye la contraseña maestra, la configuración SMTP ni los PDF de los recibos.")
         except Exception as e:
             manejar_error("No se pudo crear la copia de seguridad", e)
+            return
+
+        messagebox.showinfo(
+            "Copia de seguridad",
+            f"Backup creado correctamente en:\n\n{ruta}\n\n"
+            "No incluye la contraseña maestra, la configuración SMTP ni los PDF de los recibos.")
+
+        if not messagebox.askyesno(
+                "Copia de seguridad",
+                "¿Guardar también una copia en otro lugar (un pendrive, una carpeta en la nube, etc.)?"):
+            return
+        destino = filedialog.asksaveasfilename(
+            title="Guardar copia del backup", initialfile=os.path.basename(ruta),
+            defaultextension=".zip", filetypes=[("Backup (.zip)", "*.zip")])
+        if not destino:
+            return
+        try:
+            shutil.copy(ruta, destino)
+            messagebox.showinfo("Copia de seguridad", f"Copia guardada en:\n\n{destino}")
+        except Exception as e:
+            manejar_error("No se pudo guardar la copia en ese lugar", e)
 
     def _mostrar_ayuda_recibos(self):
         VentanaAyudaRecibos(self)
