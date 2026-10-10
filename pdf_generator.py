@@ -19,6 +19,7 @@ diccionario "datos" (ver recibo.py, que arma ese diccionario).
 """
 
 import html as html_lib
+import logging
 import os
 
 from reportlab.pdfbase import pdfmetrics
@@ -26,6 +27,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 from xhtml2pdf import default, pisa
 
 import config
+
+logger = logging.getLogger(__name__)
 
 
 def _link_callback(uri, rel):
@@ -138,6 +141,8 @@ def generar_pdf_recibo(datos, ruta_salida):
         )
 
     if resultado.err:
+        logger.error("xhtml2pdf reportó errores generando %s", ruta_salida)
         raise RuntimeError(f"xhtml2pdf reportó errores generando: {ruta_salida}")
 
+    logger.info("PDF de recibo generado: %s", ruta_salida)
     return ruta_salida

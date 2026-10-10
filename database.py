@@ -13,6 +13,7 @@ de nuevo en medio del archivo lo corrompería).
 """
 
 import csv
+import logging
 import os
 import shutil
 import tempfile
@@ -24,6 +25,8 @@ import config
 import correo
 import db
 import pagos
+
+logger = logging.getLogger(__name__)
 from unidades import (DEPTO, MODO_TOTAL, TIPOS_ASOCIABLES, etiqueta_unidad, indice_por_id, normalizar_modo,
                       normalizar_tipo)
 from utils import sanitize_filename
@@ -52,11 +55,13 @@ def _sincronizar_pagos_seguro(nombre_edificio):
     try:
         sincronizar_pagos(nombre_edificio)
     except PermissionError:
+        logger.warning("Planilla de pagos de %s abierta, no se pudo actualizar", nombre_edificio)
         _AVISOS.append(
             f"No se pudo actualizar la planilla de pagos de «{nombre_edificio}» porque está abierta.\n\n"
             "Cerrá el archivo de Excel: la próxima vez que se guarde algo se actualizará sola."
         )
     except Exception as e:
+        logger.exception("No se pudo actualizar la planilla de pagos de %s", nombre_edificio)
         _AVISOS.append(f"No se pudo actualizar la planilla de pagos de «{nombre_edificio}»:\n{e}")
 
 
@@ -249,6 +254,7 @@ def update_edificio(nombre_actual, **datos):
 
     if nuevo == nombre_actual:
         db.reemplazar("edificios", edificios)
+        logger.info("Edificio actualizado: %s", nombre_actual)
         return nombre_actual
 
     carpeta_vieja, carpeta_nueva = carpeta_edificio(nombre_actual), carpeta_edificio(nuevo)
@@ -289,6 +295,7 @@ def update_edificio(nombre_actual, **datos):
             edificio["nombre"] = nuevo
             db.reemplazar("edificios", edificios)
     except Exception:
+        logger.exception("No se pudo renombrar el edificio %s a %s, se deshacen los cambios", nombre_actual, nuevo)
         for origen, destino in reversed(renombrados):
             try:
                 os.replace(destino, origen)
@@ -296,6 +303,7 @@ def update_edificio(nombre_actual, **datos):
                 pass
         raise
 
+    logger.info("Edificio actualizado: %s -> %s", nombre_actual, nuevo)
     _sincronizar_pagos_seguro(nuevo)
     return nuevo
 
@@ -370,6 +378,7 @@ def delete_edificio(nombre):
             db.reemplazar("numeracion", [r for r in db.leer("numeracion") if r.get("edificio") != nombre])
             db.reemplazar("historial", [r for r in db.leer("historial") if r.get("edificio") != nombre])
     except Exception:
+        logger.exception("No se pudo borrar el edificio %s, se deshacen los cambios", nombre)
         for origen, nuevo in reversed(movidos):
             try:
                 shutil.move(nuevo, origen)
@@ -378,6 +387,7 @@ def delete_edificio(nombre):
         if not any(os.path.exists(nuevo) for _origen, nuevo in movidos):   # todo volvió a su lugar: no dejar restos
             shutil.rmtree(destino, ignore_errors=True)
         raise
+    logger.info("Edificio borrado: %s (archivado en %s)", nombre, destino)
     return destino
 
 
@@ -397,6 +407,7 @@ def add_edificio(nombre):
     db.reemplazar("edificios", edificios)
     crear_carpeta_edificio(nombre)
     _sincronizar_pagos_seguro(nombre)
+    logger.info("Edificio creado: %s (id=%s)", nombre, nuevo_id)
     return nuevo_id
 
 
@@ -525,6 +536,7 @@ def add_unidad(edificio, piso, tipo, unidad, inquilino, importe, depto_id="", as
     _validar_celdas(todas, edificio)
     db.reemplazar("unidades", todas)
     _sincronizar_pagos_seguro(edificio)
+    logger.info("Unidad creada: %s (edificio=%s, id=%s)", unidad, edificio, nueva["id"])
     return nueva["id"]
 
 
@@ -576,6 +588,7 @@ def update_unidad(unidad_id, **campos):
     db.reemplazar("unidades", todas)
     for nombre in edificios_afectados:
         _sincronizar_pagos_seguro(nombre)
+    logger.info("Unidad actualizada: id=%s (edificio=%s)", unidad_id, u["edificio"])
 
 
 def set_celdas(edificio, celdas_por_id):
@@ -625,6 +638,8 @@ def delete_unidad(unidad_id):
     db.reemplazar("unidades", restantes)
     _sincronizar_pagos_seguro(borradas[0]["edificio"])
     correo.borrar_emails_unidades(ids)
+    logger.info("Unidad borrada: id=%s (edificio=%s, %d fila(s) en total)",
+                unidad_id, borradas[0]["edificio"], len(borradas))
     return borradas
 
 
@@ -825,6 +840,7 @@ def crear_backup(automatico=False):
                         z.write(ruta_completa, relativa)
 
     os.replace(temporal, destino)
+    logger.info("Backup creado: %s", destino)
     if automatico:
         _podar_backups_auto(carpeta_backups)
     return destino
@@ -839,8 +855,9 @@ def _podar_backups_auto(carpeta_backups):
     for ruta in autos[:-_MAX_BACKUPS_AUTO] if len(autos) > _MAX_BACKUPS_AUTO else []:
         try:
             os.remove(ruta)
+            logger.info("Backup automático viejo eliminado: %s", ruta)
         except OSError:
-            pass
+            logger.warning("No se pudo eliminar el backup automático viejo %s", ruta, exc_info=True)
 
 
 def listar_backups():
@@ -906,4 +923,5 @@ def restaurar_backup(ruta_zip):
         _ensure_dir(os.path.dirname(destino))
         with open(destino, "wb") as f:
             f.write(contenido)
+    logger.info("Backup restaurado desde %s (%d archivo(s))", ruta_zip, len(a_restaurar) + 1)
     return len(a_restaurar) + 1   # + la base

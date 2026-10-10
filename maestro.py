@@ -13,12 +13,15 @@ externas) en la tabla "maestro" de la base de datos, junto con una pregunta de
 seguridad para poder restablecerla si se olvida.
 """
 
+import logging
 import os
 import re
 import unicodedata
 from hashlib import pbkdf2_hmac
 
 import db
+
+logger = logging.getLogger(__name__)
 
 _ITERACIONES = 200_000
 
@@ -62,19 +65,31 @@ def crear(password, pregunta, respuesta):
     if not pregunta or not respuesta:
         raise ValueError("Completá la pregunta y la respuesta de seguridad.")
 
+    existia = existe()
     sal_pw, hash_pw = _hash(password)
     sal_resp, hash_resp = _hash(_normalizar(respuesta))
     db.reemplazar("maestro", [{"sal_password": sal_pw, "hash_password": hash_pw, "pregunta": pregunta,
                                "sal_respuesta": sal_resp, "hash_respuesta": hash_resp}])
+    if existia:
+        logger.info("Contraseña maestra actualizada (cambio de contraseña y/o pregunta de seguridad)")
+    else:
+        logger.info("Contraseña maestra creada por primera vez")
 
 
-def verificar_password(password):
-    """True si 'password' es la contraseña maestra vigente (False si todavía no hay ninguna)."""
+def verificar_password(password, motivo=""):
+    """True si 'password' es la contraseña maestra vigente (False si todavía no hay ninguna).
+    'motivo' (ej. "guardar una unidad") queda en el registro, para saber para qué se usó."""
     fila = _leer()
     if not fila:
         return False
     _, hash_pw = _hash(password or "", bytes.fromhex(fila["sal_password"]))
-    return hash_pw == fila["hash_password"]
+    ok = hash_pw == fila["hash_password"]
+    sufijo = f" (motivo: {motivo})" if motivo else ""
+    if ok:
+        logger.info("Contraseña maestra ingresada correctamente%s", sufijo)
+    else:
+        logger.warning("Intento fallido de contraseña maestra%s", sufijo)
+    return ok
 
 
 def obtener_pregunta():
@@ -89,7 +104,10 @@ def verificar_respuesta(respuesta):
     if not fila:
         return False
     _, hash_resp = _hash(_normalizar(respuesta), bytes.fromhex(fila["sal_respuesta"]))
-    return hash_resp == fila["hash_respuesta"]
+    ok = hash_resp == fila["hash_respuesta"]
+    if not ok:
+        logger.warning("Intento fallido de respuesta de seguridad para recuperar la contraseña maestra")
+    return ok
 
 
 def esta_activo():
@@ -100,8 +118,10 @@ def esta_activo():
 def activar():
     global _activo
     _activo = True
+    logger.info("Control maestro activado")
 
 
 def desactivar():
     global _activo
     _activo = False
+    logger.info("Control maestro desactivado")

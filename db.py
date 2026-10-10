@@ -14,10 +14,13 @@ Decisiones:
 """
 
 import csv
+import logging
 import os
 import sqlite3
 
 import config
+
+logger = logging.getLogger(__name__)
 
 RUTA_DB = os.path.join(config.DATOS_DIR, "expensas.db")
 
@@ -209,6 +212,7 @@ def copiar_sin_secretos(destino):
 def reemplazar_base(ruta_nueva):
     """Pone 'ruta_nueva' como la base en uso (reemplazo atómico del archivo)."""
     os.replace(ruta_nueva, _ruta_activa or RUTA_DB)
+    logger.info("Base de datos reemplazada: %s", _ruta_activa or RUTA_DB)
 
 
 def migrar_desde_csv(ruta=None, origen=None):
@@ -244,6 +248,7 @@ def migrar_desde_csv(ruta=None, origen=None):
             raise RuntimeError(f"No cuadran las cantidades al migrar: {malas}")
         conexion.commit()
     except Exception:
+        logger.exception("Fallo al migrar los CSV a la base %s", ruta)
         conexion.close()
         if os.path.exists(temporal):
             os.remove(temporal)
@@ -252,4 +257,5 @@ def migrar_desde_csv(ruta=None, origen=None):
     os.replace(temporal, ruta)
     if al_crear and ruta == (_ruta_activa or RUTA_DB):
         al_crear()
+    logger.info("Migración de CSV a base completada: %s (%s)", ruta, informe)
     return informe

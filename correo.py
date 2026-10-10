@@ -21,6 +21,7 @@ hace falta poder usarla para conectarse al servidor); el acceso a esta pantalla 
 protegido por la contraseña maestra.
 """
 
+import logging
 import os
 import re
 import smtplib
@@ -31,6 +32,8 @@ from email.message import EmailMessage
 import config
 import db
 from recibo import abreviar_periodo
+
+logger = logging.getLogger(__name__)
 
 EMAILS_CAMPOS = ["unidad_id", "inquilino1", "inquilino2", "dueno1", "dueno2"]
 SMTP_CAMPOS = ["servidor", "puerto", "usuario", "password", "tls"]
@@ -120,6 +123,7 @@ def guardar_smtp(datos):
     if not fila["usuario"] or not es_email_valido(fila["usuario"]):
         raise ValueError("El usuario tiene que ser un mail válido: es también la dirección que figura como remitente.")
     db.reemplazar("smtp", [fila])
+    logger.info("Configuración SMTP guardada (servidor=%s, usuario=%s)", fila["servidor"], fila["usuario"])
 
 
 def _conectar(smtp):
@@ -143,6 +147,7 @@ def probar_conexion(smtp):
         conexion.quit()
         return True, "Conexión correcta."
     except Exception as e:
+        logger.warning("Fallo al probar la conexión SMTP (servidor=%s): %s", smtp.get("servidor"), e)
         return False, str(e)
 
 
@@ -326,6 +331,12 @@ def reenviar(fila_historial, destinatario, cc=None):
     asunto, cuerpo = construir_mensaje(fila_historial, edificio)
     ok, detalle = enviar_mail(smtp, destinatario, asunto, cuerpo, ruta_adjunto, cc=cc)
     registrar_envio(edificio, fila_historial, destinatario, ok, detalle or "")
+    if ok:
+        logger.info("Mail enviado: edificio=%s destinatario=%s recibo=%s",
+                    edificio, destinatario, fila_historial.get("numero_recibo", ""))
+    else:
+        logger.warning("Fallo al enviar mail: edificio=%s destinatario=%s detalle=%s",
+                       edificio, destinatario, detalle)
     return ok, detalle
 
 

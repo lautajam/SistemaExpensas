@@ -16,9 +16,9 @@ Cualquier error inesperado se captura y se muestra como un mensaje
 comprensible (messagebox), nunca como un traceback crudo de Python.
 """
 
+import logging
 import os
 import shutil
-import traceback
 import tkinter as tk
 from datetime import date, datetime
 from tkinter import ttk, messagebox, filedialog
@@ -27,6 +27,8 @@ import config
 import correo
 import database
 import maestro
+
+logger = logging.getLogger(__name__)
 from utils import (
     normalizar_cuit,
     parse_importe,
@@ -59,8 +61,8 @@ DESMARCADO = "☐"
 
 
 def manejar_error(titulo, error):
-    """Muestra un mensaje de error comprensible y registra el detalle en consola."""
-    traceback.print_exc()
+    """Muestra un mensaje de error comprensible y registra el detalle en el log."""
+    logger.exception(titulo)
     messagebox.showerror(titulo, f"Ocurrió un problema:\n\n{error}")
 
 
@@ -91,13 +93,14 @@ def ajustar_tamano_minimo(ventana):
 # vez de bloquear), para no depender de un mainloop anidado.
 # ===========================================================================
 
-def requerir_maestro(parent, on_ok):
+def requerir_maestro(parent, on_ok, motivo=""):
     """
     Gate de una acción protegida por la contraseña maestra (abrir una de esas tres
     pantallas, o guardar/borrar algo dentro de ellas). Con el control maestro activo
     llama a on_ok() de una: no pregunta nada. Si todavía no hay contraseña creada,
     obliga a crear una. Si se cancela o se pone una contraseña incorrecta, no llama a
     on_ok(): quien invoca no tiene que hacer nada más (la acción queda abortada).
+    'motivo' (ej. "guardar una unidad") queda registrado en el log junto con la hora.
     """
     if maestro.esta_activo():
         on_ok()
@@ -105,7 +108,7 @@ def requerir_maestro(parent, on_ok):
     if not maestro.existe():
         DialogoCrearMaestro(parent, on_ok=on_ok)
         return
-    DialogoPedirPassword(parent, on_ok=on_ok)
+    DialogoPedirPassword(parent, on_ok=on_ok, motivo=motivo)
 
 
 class DialogoCrearMaestro(tk.Toplevel):
@@ -175,9 +178,10 @@ class DialogoCrearMaestro(tk.Toplevel):
 class DialogoPedirPassword(tk.Toplevel):
     """Pide la contraseña maestra para una sola acción (no activa el control maestro)."""
 
-    def __init__(self, parent, on_ok=None, titulo="Contraseña maestra"):
+    def __init__(self, parent, on_ok=None, titulo="Contraseña maestra", motivo=""):
         super().__init__(parent)
         self.on_ok = on_ok
+        self.motivo = motivo
         self.title(titulo)
         self.configure(bg=COLOR_FONDO)
         self.resizable(False, False)
@@ -208,7 +212,7 @@ class DialogoPedirPassword(tk.Toplevel):
         tk.Button(botones, text="Cancelar", command=self.destroy, padx=14, pady=4).pack(side="left", padx=6)
 
     def _confirmar(self):
-        if maestro.verificar_password(self.var_pw.get()):
+        if maestro.verificar_password(self.var_pw.get(), motivo=self.motivo):
             self.destroy()
             if self.on_ok:
                 self.on_ok()
@@ -323,7 +327,7 @@ class VentanaControlMaestro(tk.Toplevel):
         def al_confirmar():
             maestro.activar()
             self._dibujar()
-        DialogoPedirPassword(self, on_ok=al_confirmar)
+        DialogoPedirPassword(self, on_ok=al_confirmar, motivo="activar el control maestro")
 
     def _bloquear(self):
         maestro.desactivar()
@@ -332,7 +336,8 @@ class VentanaControlMaestro(tk.Toplevel):
     def _cambiar(self):
         def al_confirmar():
             DialogoCrearMaestro(self, on_ok=self._dibujar, motivo="Nueva contraseña maestra:")
-        DialogoPedirPassword(self, on_ok=al_confirmar, titulo="Confirmá la contraseña actual")
+        DialogoPedirPassword(self, on_ok=al_confirmar, titulo="Confirmá la contraseña actual",
+                             motivo="cambiar la contraseña o la pregunta de seguridad")
 
 
 # ===========================================================================
@@ -377,7 +382,7 @@ def confirmar_y_borrar(parent, unidad_id, on_borrado=None):
         if on_borrado:
             on_borrado()
 
-    requerir_maestro(parent, borrar_de_verdad)
+    requerir_maestro(parent, borrar_de_verdad, motivo="borrar una unidad")
 
 
 # Cómo paga una cochera/baulera de un depto: (código guardado, texto para elegir, texto corto de la lista)
@@ -837,7 +842,7 @@ class DialogoUnidad(tk.Toplevel):
             except Exception as e:
                 manejar_error("No se pudo guardar la unidad", e)
 
-        requerir_maestro(self, guardar_de_verdad)
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar una unidad")
 
 
 # ===========================================================================
@@ -887,7 +892,7 @@ class DialogoEdificioNuevo(tk.Toplevel):
             except Exception as e:
                 manejar_error("No se pudo crear el edificio", e)
 
-        requerir_maestro(self, guardar_de_verdad)
+        requerir_maestro(self, guardar_de_verdad, motivo="crear un edificio")
 
 
 # ===========================================================================
@@ -992,7 +997,7 @@ class DialogoDatosConsorcio(tk.Toplevel):
                 self.on_guardar(nombre_final)
             self.destroy()
 
-        requerir_maestro(self, guardar_de_verdad)
+        requerir_maestro(self, guardar_de_verdad, motivo="editar los datos del consorcio")
 
 
 # ===========================================================================
@@ -1063,7 +1068,7 @@ class DialogoBorrarEdificio(tk.Toplevel):
             if self.on_borrado:
                 self.on_borrado(destino)
 
-        requerir_maestro(self, borrar_de_verdad)
+        requerir_maestro(self, borrar_de_verdad, motivo="borrar un edificio")
 
 
 # ===========================================================================
@@ -1171,7 +1176,7 @@ class VentanaAsignarCeldas(tk.Toplevel):
                 self.on_guardar()
             self.destroy()
 
-        requerir_maestro(self, guardar_de_verdad)
+        requerir_maestro(self, guardar_de_verdad, motivo="asignar celdas de la planilla")
 
 
 # ===========================================================================
@@ -1444,7 +1449,7 @@ class VentanaConfiguracion(tk.Toplevel):
             except Exception as e:
                 manejar_error("No se pudo guardar la configuración", e)
 
-        requerir_maestro(self, guardar_de_verdad)
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar la configuración de la inmobiliaria")
 
 
 # ===========================================================================
@@ -1521,7 +1526,7 @@ class DialogoConfiguracionSMTP(tk.Toplevel):
             if self.on_guardado:
                 self.on_guardado()
 
-        requerir_maestro(self, guardar_de_verdad)
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar la configuración SMTP")
 
 
 class DialogoPlantillaMail(tk.Toplevel):
@@ -1594,7 +1599,7 @@ class DialogoPlantillaMail(tk.Toplevel):
             if self.on_guardado:
                 self.on_guardado()
 
-        requerir_maestro(self, guardar_de_verdad)
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar la plantilla del mail")
 
 
 class DialogoCopiaMail(tk.Toplevel):
@@ -1645,7 +1650,7 @@ class DialogoCopiaMail(tk.Toplevel):
             if self.on_guardado:
                 self.on_guardado()
 
-        requerir_maestro(self, guardar_de_verdad)
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar la copia (CC) del mail")
 
 
 class VentanaMails(tk.Toplevel):
@@ -1773,7 +1778,7 @@ class VentanaMails(tk.Toplevel):
             messagebox.showinfo("Mails", "Las direcciones se guardaron correctamente.", parent=self)
             self.destroy()
 
-        requerir_maestro(self, guardar_de_verdad)
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar las direcciones de mail")
 
 
 class VentanaRegistroEnvios(tk.Toplevel):
@@ -2555,7 +2560,8 @@ class App(tk.Tk):
         menu_archivo = tk.Menu(menubar, tearoff=0)
         menu_archivo.add_command(label="Copia de seguridad (backup)", command=self._hacer_backup)
         menu_archivo.add_command(label="Cargar desde backup...",
-                                 command=lambda: requerir_maestro(self, lambda: VentanaCargarBackup(self)))
+                                 command=lambda: requerir_maestro(
+                                     self, lambda: VentanaCargarBackup(self), motivo="cargar un backup"))
         menu_archivo.add_separator()
         menu_archivo.add_command(label="Salir", command=self._cerrar)
         menubar.add_cascade(label="Archivo", menu=menu_archivo)
@@ -3101,16 +3107,17 @@ class App(tk.Tk):
 
     def _abrir_administracion(self):
         requerir_maestro(self, lambda: VentanaAdministracion(
-            self, self.var_edificio.get() or "", on_cambios=self._refrescar_edificios))
+            self, self.var_edificio.get() or "", on_cambios=self._refrescar_edificios),
+            motivo="abrir Administrar edificios y unidades")
 
     def _abrir_configuracion(self):
-        requerir_maestro(self, lambda: VentanaConfiguracion(self))
+        requerir_maestro(self, lambda: VentanaConfiguracion(self), motivo="abrir la Configuración de la inmobiliaria")
 
     def _abrir_control_maestro(self):
         VentanaControlMaestro(self)
 
     def _abrir_mails(self):
-        requerir_maestro(self, lambda: VentanaMails(self, self.var_edificio.get() or ""))
+        requerir_maestro(self, lambda: VentanaMails(self, self.var_edificio.get() or ""), motivo="abrir Mailing")
 
     def _abrir_historial(self):
         VentanaHistorial(self)
@@ -3150,6 +3157,7 @@ class App(tk.Tk):
         try:
             database.crear_backup(automatico=True)
         except Exception as e:
+            logger.exception("No se pudo hacer la copia de seguridad automática al cerrar")
             if not messagebox.askyesno(
                     "Copia de seguridad automática",
                     f"No se pudo hacer la copia de seguridad automática al cerrar:\n\n{e}\n\n"
