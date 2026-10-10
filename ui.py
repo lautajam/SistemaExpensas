@@ -1655,7 +1655,7 @@ class VentanaMails(tk.Toplevel):
         super().__init__(parent)
         self.title("Mailing")
         self.configure(bg=COLOR_FONDO)
-        self.geometry("840x560")
+        self.geometry("960x560")
         self.transient(parent)
         self.grab_set()
 
@@ -1673,7 +1673,7 @@ class VentanaMails(tk.Toplevel):
         tk.Button(top, text="Asunto y cuerpo del mail", command=self._editar_plantilla).pack(side="right", padx=(0, 8))
 
         tk.Label(
-            self, bg=COLOR_FONDO, fg="#666666", font=("Segoe UI", 8), justify="left", wraplength=720,
+            self, bg=COLOR_FONDO, fg="#666666", font=("Segoe UI", 8), justify="left", wraplength=840,
             text="Al enviar un recibo se manda a todos los inquilinos y dueños que estén cargados.\n"
                  "Un depto que paga junto con su cochera/baulera usa los mails del depto.",
         ).pack(anchor="w", padx=16, pady=(0, 6))
