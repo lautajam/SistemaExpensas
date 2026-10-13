@@ -25,9 +25,14 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
+    QComboBox,
+    QDialog,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QListWidget,
     QMainWindow,
     QMessageBox,
@@ -40,24 +45,39 @@ from PySide6.QtWidgets import (
 
 import config
 import database
+import maestro
 import pagos
 from utils import (
+    abrir_carpeta_en_explorador,
     fecha_hoy_es,
     format_currency_ar,
     nombre_archivo_recibo,
+    normalizar_cuit,
     obtener_periodos,
     parse_importe,
 )
 from pdf_generator import generar_pdf_recibo
 from recibo import armar_datos as armar_datos_recibo
 from unidades import (
+    BAULERA,
+    COCHERA,
+    DEPTO,
+    LOCAL,
+    TIPOS,
+    TIPOS_ASOCIABLES,
+    MODO_APARTE,
+    MODO_JUNTO,
+    MODO_TOTAL,
     asociadas_que_pagan_junto,
     depto_de,
     descripcion_asociadas,
     etiqueta_unidad,
     incluida_en_total,
     indice_por_id,
+    modo_pago,
+    nombre_tipo,
     normalizar_tipo,
+    ordenar_con_asociadas,
     ordenar_para_pantalla,
 )
 
@@ -122,6 +142,40 @@ QWidget#tarjeta {{
 }}
 
 QLabel {{ color: {COLOR_TEXTO}; font-size: 12px; background: transparent; }}
+QLabel#error {{ color: #f87171; font-size: 11px; background: transparent; }}
+QLabel#enlace {{ color: {COLOR_ACENTO}; font-size: 11px; text-decoration: underline; background: transparent; }}
+
+QLineEdit {{
+    background-color: {COLOR_TARJETA_ALT};
+    border: 1px solid {COLOR_BORDE};
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: {COLOR_TEXTO};
+    font-size: 12px;
+}}
+QLineEdit:focus {{ border-color: {COLOR_ACENTO}; }}
+
+QFrame#separador {{ background-color: {COLOR_BORDE}; max-height: 1px; min-height: 1px; border: none; }}
+
+QComboBox {{
+    background-color: {COLOR_TARJETA_ALT};
+    border: 1px solid {COLOR_BORDE};
+    border-radius: 6px;
+    padding: 6px 10px;
+    min-height: 20px;
+    font-size: 12px;
+    color: {COLOR_TEXTO};
+}}
+QComboBox:hover {{ border-color: {COLOR_ACENTO}; }}
+QComboBox::drop-down {{ border: none; width: 24px; }}
+QComboBox::down-arrow {{ image: url({_DIR_RECURSOS}/flecha_abajo.png); width: 10px; height: 10px; }}
+QComboBox:disabled {{ color: {COLOR_TEXTO_SUAVE}; background-color: {COLOR_TARJETA}; }}
+
+QListWidget#listaSimple {{
+    background-color: {COLOR_TARJETA_ALT};
+    border: 1px solid {COLOR_BORDE};
+    border-radius: 6px;
+}}
 
 QWidget#sidebar {{
     background-color: {COLOR_TARJETA};
@@ -241,6 +295,1446 @@ def mostrar_avisos(parent=None):
         QMessageBox.warning(parent, "Planilla de pagos", aviso)
 
 
+# ===========================================================================
+# Contraseña maestra (ver maestro.py): protege abrir Administrar edificios/unidades,
+# Mailing y Configuración de la inmobiliaria, y cada alta/edición/borrado dentro de ellas.
+#
+# Los diálogos son asincrónicos (on_ok, no bloquean), igual que en la versión Tkinter.
+# ===========================================================================
+
+def requerir_maestro(parent, on_ok, motivo=""):
+    """
+    Gate de una acción protegida por la contraseña maestra. Con el control maestro
+    activo llama a on_ok() de una: no pregunta nada. Si todavía no hay contraseña
+    creada, obliga a crear una. Si se cancela o se pone una contraseña incorrecta,
+    no llama a on_ok(): quien invoca no tiene que hacer nada más.
+    """
+    if maestro.esta_activo():
+        on_ok()
+        return
+    if not maestro.existe():
+        DialogoCrearMaestro(parent, on_ok=on_ok).show()
+        return
+    DialogoPedirPassword(parent, on_ok=on_ok, motivo=motivo).show()
+
+
+class DialogoCrearMaestro(QDialog):
+    """Crea (o reemplaza) la contraseña maestra y su pregunta de seguridad."""
+
+    def __init__(self, parent, on_ok=None, motivo=None):
+        super().__init__(parent)
+        self.on_ok = on_ok
+        self.setWindowTitle("Crear contraseña maestra")
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+
+        texto = QLabel(motivo or "Esta contraseña se va a pedir para administrar edificios, "
+                                  "unidades, la inmobiliaria y los datos.")
+        texto.setWordWrap(True)
+        layout.addWidget(texto)
+
+        grilla = QGridLayout()
+        grilla.setHorizontalSpacing(10)
+        grilla.setVerticalSpacing(6)
+        self.campo_pw = QLineEdit()
+        self.campo_pw.setEchoMode(QLineEdit.Password)
+        self.campo_pw2 = QLineEdit()
+        self.campo_pw2.setEchoMode(QLineEdit.Password)
+        self.campo_pregunta = QLineEdit()
+        self.campo_respuesta = QLineEdit()
+        for fila, (etiqueta, campo) in enumerate((
+            ("Contraseña nueva:", self.campo_pw),
+            ("Repetir contraseña:", self.campo_pw2),
+            ("Pregunta de seguridad:", self.campo_pregunta),
+            ("Respuesta:", self.campo_respuesta),
+        )):
+            grilla.addWidget(QLabel(etiqueta), fila, 0)
+            grilla.addWidget(campo, fila, 1)
+        layout.addLayout(grilla)
+        self.campo_pw.setFocus()
+
+        aviso = QLabel("Guardala bien: si la olvidás, se restablece con la pregunta de seguridad.")
+        aviso.setStyleSheet(f"color: {COLOR_TEXTO_SUAVE}; font-size: 10px; background: transparent;")
+        aviso.setWordWrap(True)
+        layout.addWidget(aviso)
+
+        botones = QHBoxLayout()
+        boton_guardar = QPushButton("Guardar")
+        boton_guardar.setObjectName("botonAcento")
+        boton_guardar.clicked.connect(self._guardar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_guardar)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _guardar(self):
+        if self.campo_pw.text() != self.campo_pw2.text():
+            QMessageBox.warning(self, "Contraseñas distintas", "Las dos contraseñas no coinciden.")
+            return
+        try:
+            maestro.crear(self.campo_pw.text(), self.campo_pregunta.text(), self.campo_respuesta.text())
+        except ValueError as e:
+            QMessageBox.warning(self, "Datos incompletos", str(e))
+            return
+        self.accept()
+        if self.on_ok:
+            self.on_ok()
+
+
+class DialogoPedirPassword(QDialog):
+    """Pide la contraseña maestra para una sola acción (no activa el control maestro)."""
+
+    def __init__(self, parent, on_ok=None, titulo="Contraseña maestra", motivo=""):
+        super().__init__(parent)
+        self.on_ok = on_ok
+        self.motivo = motivo
+        self.setWindowTitle(titulo)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        fila = QHBoxLayout()
+        fila.addWidget(QLabel("Contraseña:"))
+        self.campo_pw = QLineEdit()
+        self.campo_pw.setEchoMode(QLineEdit.Password)
+        self.campo_pw.returnPressed.connect(self._confirmar)
+        fila.addWidget(self.campo_pw)
+        layout.addLayout(fila)
+        self.campo_pw.setFocus()
+
+        self.lbl_error = QLabel("")
+        self.lbl_error.setObjectName("error")
+        layout.addWidget(self.lbl_error)
+
+        enlace = QLabel("¿Olvidaste tu contraseña?")
+        enlace.setObjectName("enlace")
+        enlace.setCursor(Qt.PointingHandCursor)
+        enlace.mousePressEvent = lambda e: self._olvidada()
+        layout.addWidget(enlace)
+
+        botones = QHBoxLayout()
+        boton_confirmar = QPushButton("Confirmar")
+        boton_confirmar.setObjectName("botonAcento")
+        boton_confirmar.clicked.connect(self._confirmar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_confirmar)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _confirmar(self):
+        if maestro.verificar_password(self.campo_pw.text(), motivo=self.motivo):
+            self.accept()
+            if self.on_ok:
+                self.on_ok()
+            return
+        self.lbl_error.setText("Contraseña incorrecta.")
+        self.campo_pw.clear()
+
+    def _olvidada(self):
+        def al_recuperar():
+            self.accept()
+            if self.on_ok:
+                self.on_ok()
+        DialogoRecuperarMaestro(self, on_ok=al_recuperar).show()
+
+
+class DialogoRecuperarMaestro(QDialog):
+    """Restablece la contraseña maestra respondiendo la pregunta de seguridad."""
+
+    def __init__(self, parent, on_ok=None):
+        super().__init__(parent)
+        self.on_ok = on_ok
+        self.setWindowTitle("Restablecer contraseña maestra")
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        pregunta = QLabel(maestro.obtener_pregunta() or "")
+        pregunta.setWordWrap(True)
+        pregunta.setStyleSheet(f"color: {COLOR_TEXTO}; font-weight: 700; background: transparent;")
+        layout.addWidget(pregunta)
+
+        fila = QHBoxLayout()
+        fila.addWidget(QLabel("Respuesta:"))
+        self.campo_resp = QLineEdit()
+        self.campo_resp.returnPressed.connect(self._verificar)
+        fila.addWidget(self.campo_resp)
+        layout.addLayout(fila)
+        self.campo_resp.setFocus()
+
+        self.lbl_error = QLabel("")
+        self.lbl_error.setObjectName("error")
+        layout.addWidget(self.lbl_error)
+
+        botones = QHBoxLayout()
+        boton_verificar = QPushButton("Verificar")
+        boton_verificar.setObjectName("botonAcento")
+        boton_verificar.clicked.connect(self._verificar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_verificar)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _verificar(self):
+        if not maestro.verificar_respuesta(self.campo_resp.text()):
+            self.lbl_error.setText("Respuesta incorrecta.")
+            self.campo_resp.clear()
+            return
+
+        def al_crear():
+            self.accept()
+            if self.on_ok:
+                self.on_ok()
+        DialogoCrearMaestro(self, on_ok=al_crear, motivo="Respuesta correcta. Elegí una contraseña nueva:").show()
+
+
+class VentanaControlMaestro(QDialog):
+    """Menú Administrar → Control maestro: activar/bloquear la sesión y cambiar la contraseña."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Control maestro")
+        self.setModal(True)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(20, 16, 20, 16)
+        self._layout.setSpacing(10)
+        self._dibujar()
+
+    def _limpiar(self):
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _dibujar(self):
+        self._limpiar()
+
+        if not maestro.existe():
+            texto = QLabel("Todavía no configuraste una contraseña maestra.\n"
+                            "Mientras tanto, administrar edificios, unidades y la\n"
+                            "inmobiliaria queda libre, sin pedir nada.")
+            texto.setWordWrap(True)
+            self._layout.addWidget(texto)
+            boton = QPushButton("Crear contraseña maestra")
+            boton.setObjectName("botonAcento")
+            boton.clicked.connect(self._crear)
+            self._layout.addWidget(boton)
+            return
+
+        if maestro.esta_activo():
+            estado = QLabel("Control maestro ACTIVO.")
+            estado.setStyleSheet("color: #4ade80; font-weight: 700; background: transparent;")
+            self._layout.addWidget(estado)
+            detalle = QLabel("No te va a pedir la contraseña hasta que lo bloquees\no cierres el programa.")
+            detalle.setWordWrap(True)
+            self._layout.addWidget(detalle)
+            boton = QPushButton("Bloquear")
+            boton.setStyleSheet("background-color: #dc2626; color: white; border: none;")
+            boton.clicked.connect(self._bloquear)
+            self._layout.addWidget(boton)
+        else:
+            estado = QLabel("Control maestro bloqueado.")
+            estado.setStyleSheet("font-weight: 700; background: transparent;")
+            self._layout.addWidget(estado)
+            detalle = QLabel("Desbloquealo para administrar sin que te pida la\ncontraseña en cada acción.")
+            detalle.setWordWrap(True)
+            self._layout.addWidget(detalle)
+            boton = QPushButton("Desbloquear")
+            boton.setObjectName("botonAcento")
+            boton.clicked.connect(self._desbloquear)
+            self._layout.addWidget(boton)
+
+        separador = QFrame()
+        separador.setObjectName("separador")
+        separador.setFrameShape(QFrame.HLine)
+        self._layout.addWidget(separador)
+
+        boton_cambiar = QPushButton("Cambiar contraseña / pregunta")
+        boton_cambiar.clicked.connect(self._cambiar)
+        self._layout.addWidget(boton_cambiar)
+
+    def _crear(self):
+        DialogoCrearMaestro(self, on_ok=self._dibujar).show()
+
+    def _desbloquear(self):
+        def al_confirmar():
+            maestro.activar()
+            self._dibujar()
+        DialogoPedirPassword(self, on_ok=al_confirmar, motivo="activar el control maestro").show()
+
+    def _bloquear(self):
+        maestro.desactivar()
+        self._dibujar()
+
+    def _cambiar(self):
+        def al_confirmar():
+            DialogoCrearMaestro(self, on_ok=self._dibujar, motivo="Nueva contraseña maestra:").show()
+        DialogoPedirPassword(
+            self, on_ok=al_confirmar, titulo="Confirmá la contraseña actual",
+            motivo="cambiar la contraseña o la pregunta de seguridad").show()
+
+
+# ===========================================================================
+# Helpers compartidos por los diálogos de unidades/edificios (se usan a medida
+# que se van portando VentanaAdministracion, DialogoUnidad, etc.)
+# ===========================================================================
+
+NINGUNO = "(ninguno)"
+
+
+def confirmar_y_borrar(parent, unidad_id, on_borrado=None):
+    """
+    Muestra qué se va a borrar (la unidad y, si es un depto, sus cocheras y bauleras),
+    pide confirmación y la contraseña maestra, y borra. Si se borra, llama a on_borrado().
+    """
+    afectadas = database.unidades_a_borrar(unidad_id)
+    if not afectadas:
+        return
+    por_id = indice_por_id(database.get_unidades_por_edificio(afectadas[0]["edificio"]))
+    lineas = [
+        f"  • {etiqueta_unidad(u, por_id)}" + (f" — {u['inquilino']}" if u["inquilino"] else "")
+        for u in afectadas[:12]
+    ]
+    if len(afectadas) > 12:
+        lineas.append(f"  … y {len(afectadas) - 12} más")
+
+    confirmado = QMessageBox.question(
+        parent, "Borrar unidad",
+        "Se va a BORRAR:\n\n" + "\n".join(lineas) + "\n\n"
+        "También se quita de la planilla de pagos del edificio. Los recibos ya generados "
+        "y el historial no se borran.\nEsta acción no se puede deshacer.\n\n¿Borrar?",
+    )
+    if confirmado != QMessageBox.Yes:
+        return
+
+    def borrar_de_verdad():
+        try:
+            database.delete_unidad(unidad_id)
+        except Exception as e:
+            manejar_error("No se pudo borrar la unidad", e, parent)
+            return
+        mostrar_avisos(parent)
+        if on_borrado:
+            on_borrado()
+
+    requerir_maestro(parent, borrar_de_verdad, motivo="borrar una unidad")
+
+
+def confirmar_modo_celdas(parent, edificio):
+    """
+    Si el edificio todavía no usa celdas, avisa lo que cambia al asignar la primera:
+    la app deja de armar y tocar su planilla y solo la lee tal cual. True si sigue.
+    """
+    if pagos.modo_celdas(database.get_unidades_por_edificio(edificio)):
+        return True
+    return QMessageBox.question(
+        parent, "Planilla con celdas",
+        f"Al asignar una celda, la planilla de pagos de «{edificio}» pasa a usarse tal cual está: "
+        "la app deja de modificarla y lee los montos de la celda de cada unidad.\n\n"
+        f"El archivo tiene que estar en:\n{pagos.ruta_pagos_edificio(edificio)}\n\n"
+        "Las unidades sin celda no van a poder generar recibo hasta que se les asigne una.\n\n"
+        "¿Continuar?",
+    ) == QMessageBox.Yes
+
+
+def _estilizar_combo(combo):
+    """Aplica el mismo estilo oscuro (con hover azul) al desplegable de cualquier QComboBox.
+    Hace falta ponerlo por instancia: Fusion pinta el popup de un QComboBox con QPalette.Highlight
+    y no respeta el ::item:hover del QSS global (ver ui_qt.py en la ventana principal)."""
+    vista = combo.view()
+    vista.setMouseTracking(True)
+    vista.setStyleSheet(f"""
+        QListView {{
+            background-color: {COLOR_TARJETA_ALT};
+            color: {COLOR_TEXTO};
+            border: 1px solid {COLOR_BORDE};
+            outline: none;
+            padding: 4px;
+        }}
+        QListView::item {{
+            background-color: {COLOR_TARJETA_ALT};
+            color: {COLOR_TEXTO};
+            padding: 8px 10px;
+            border-radius: 4px;
+            min-height: 20px;
+        }}
+        QListView::item:hover {{
+            background-color: {COLOR_ACENTO};
+            color: white;
+        }}
+        QListView::item:selected {{
+            background-color: {COLOR_ACENTO_HOVER};
+            color: white;
+        }}
+    """)
+
+
+# Cómo paga una cochera/baulera de un depto: (código guardado, texto para elegir, texto corto de la lista)
+MODOS_PAGO = [
+    (MODO_APARTE, "Recibo aparte", "recibo aparte"),
+    (MODO_JUNTO, "Paga junto con el depto (tiene su fila en la planilla)", "paga junto"),
+    (MODO_TOTAL, "Incluida en el total del depto (sin fila ni celda propia)", "incluida en el total"),
+]
+_TEXTO_MODO = {cod: largo for cod, largo, _corto in MODOS_PAGO}
+_CORTO_MODO = {cod: corto for cod, _largo, corto in MODOS_PAGO}
+_CODIGO_MODO = {largo: cod for cod, largo, _corto in MODOS_PAGO}
+
+
+# ===========================================================================
+# Diálogo: alta / edición de unidad (depto, local, cochera o baulera)
+# ===========================================================================
+
+class DialogoAsociada(QDialog):
+    """Mini formulario para sumar una cochera o baulera a un depto."""
+
+    def __init__(self, parent, tipo, on_agregar):
+        super().__init__(parent)
+        self.tipo = tipo
+        self.on_agregar = on_agregar
+        self.setWindowTitle(f"Nueva {nombre_tipo(tipo).lower()}")
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        grilla = QGridLayout()
+        grilla.setHorizontalSpacing(10)
+        grilla.setVerticalSpacing(6)
+        self.campo_celda = QLineEdit()
+        self.campo_unidad = QLineEdit()
+        self.campo_uf = QLineEdit()
+        self.campo_piso = QLineEdit()
+        self.campo_dueno = QLineEdit()
+        self.campo_importe = QLineEdit("0")
+        for fila, (etiqueta, campo) in enumerate((
+            ("Celda en la planilla (ej. B12):", self.campo_celda),
+            ("Número (ej: 3):", self.campo_unidad),
+            ("Unidad funcional (UF):", self.campo_uf),
+            ("Piso (opcional):", self.campo_piso),
+            ("Dueño:", self.campo_dueno),
+            ("Importe:", self.campo_importe),
+        )):
+            grilla.addWidget(QLabel(etiqueta), fila, 0)
+            grilla.addWidget(campo, fila, 1)
+        layout.addLayout(grilla)
+        self.campo_unidad.setFocus()
+
+        nota = QLabel("El inquilino es el del depto.")
+        nota.setStyleSheet(f"color: {COLOR_TEXTO_SUAVE}; font-size: 10px; background: transparent;")
+        layout.addWidget(nota)
+
+        fila_modo = QHBoxLayout()
+        fila_modo.addWidget(QLabel("Cómo paga:"))
+        self.combo_modo = QComboBox()
+        self.combo_modo.addItems([largo for _c, largo, _k in MODOS_PAGO])
+        _estilizar_combo(self.combo_modo)
+        fila_modo.addWidget(self.combo_modo)
+        layout.addLayout(fila_modo)
+
+        botones = QHBoxLayout()
+        boton_agregar = QPushButton("Agregar")
+        boton_agregar.setObjectName("botonAcento")
+        boton_agregar.clicked.connect(self._agregar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_agregar)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _agregar(self):
+        numero = self.campo_unidad.text().strip()
+        if not numero:
+            QMessageBox.warning(self, "Datos incompletos", "Completá el número.")
+            return
+        try:
+            celda = pagos.normalizar_celda(self.campo_celda.text())
+        except ValueError as e:
+            QMessageBox.warning(self, "Celda inválida", str(e))
+            return
+        modo = _CODIGO_MODO[self.combo_modo.currentText()]
+        self.on_agregar({
+            "tipo": self.tipo,
+            "unidad": numero,
+            "uf": self.campo_uf.text().strip(),
+            "piso": self.campo_piso.text().strip(),
+            "dueno": self.campo_dueno.text().strip(),
+            "importe": parse_importe(self.campo_importe.text()),
+            "paga_junto": modo,
+            "celda": "" if modo == MODO_TOTAL else celda,
+        })
+        self.accept()
+
+
+class DialogoElegirAsociada(QDialog):
+    """Lista de cocheras/bauleras ya creadas para sumarlas a un depto."""
+
+    def __init__(self, parent, candidatas, on_elegir):
+        super().__init__(parent)
+        self.candidatas = candidatas
+        self.on_elegir = on_elegir
+        self.setWindowTitle("Vincular existente")
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        titulo = QLabel("Cocheras y bauleras sueltas (podés elegir varias):")
+        titulo.setStyleSheet(f"color: {COLOR_TEXTO}; font-weight: 700; background: transparent;")
+        layout.addWidget(titulo)
+
+        self.lista = QListWidget()
+        self.lista.setObjectName("listaSimple")
+        self.lista.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        for _id, nombre in candidatas:
+            self.lista.addItem(nombre)
+        layout.addWidget(self.lista)
+
+        botones = QHBoxLayout()
+        boton_vincular = QPushButton("Vincular")
+        boton_vincular.setObjectName("botonAcento")
+        boton_vincular.clicked.connect(self._elegir)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_vincular)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _elegir(self):
+        filas = [self.lista.row(i) for i in self.lista.selectedItems()]
+        if not filas:
+            QMessageBox.information(self, "Vincular existente", "Elegí al menos una de la lista.")
+            return
+        self.on_elegir([self.candidatas[i] for i in filas])
+        self.accept()
+
+
+class DialogoUnidad(QDialog):
+    def __init__(self, parent, edificio, unidad=None, on_guardar=None):
+        super().__init__(parent)
+        self.edificio = edificio
+        self.unidad = unidad  # dict si es edición, None si es alta
+        self.on_guardar = on_guardar
+        self._items = []            # lo que muestra la lista de cocheras/bauleras (ver _agregar_item)
+        self._a_desvincular = []    # ids de asociadas a soltar del depto al guardar
+        self._autoinquilino = ""    # último inquilino copiado automáticamente desde el depto
+
+        self.setWindowTitle("Editar unidad" if unidad else "Nueva unidad")
+        self.setModal(True)
+
+        todas = database.get_unidades_por_edificio(edificio)
+        self._por_id = indice_por_id(todas)
+        propio_id = unidad["id"] if unidad else None
+        self._ids_deptos = {NINGUNO: ""}
+        for d, _nivel in ordenar_con_asociadas(todas):
+            if normalizar_tipo(d["tipo"]) != DEPTO or d["id"] == propio_id:
+                continue
+            base = etiqueta_unidad(d) + (f" — {d['inquilino']}" if d["inquilino"] else "")
+            texto, n = base, 2
+            while texto in self._ids_deptos:
+                texto, n = f"{base} #{n}", n + 1
+            self._ids_deptos[texto] = d["id"]
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+
+        titulo = QLabel(f"Edificio: {edificio}")
+        titulo.setStyleSheet(f"color: {COLOR_TEXTO}; font-weight: 700; background: transparent;")
+        layout.addWidget(titulo)
+
+        self._grilla = QGridLayout()
+        self._grilla.setHorizontalSpacing(10)
+        self._grilla.setVerticalSpacing(6)
+        layout.addLayout(self._grilla)
+
+        tipo_actual = normalizar_tipo(unidad["tipo"]) if unidad else DEPTO
+        self.campo_celda = QLineEdit(unidad["celda"] if unidad else "")
+        self.campo_piso = QLineEdit(unidad["piso"] if unidad else "")
+        self.campo_unidad = QLineEdit(unidad["unidad"] if unidad else "")
+        self.campo_uf = QLineEdit(unidad["uf"] if unidad else "")
+        self.campo_dueno = QLineEdit(unidad["dueno"] if unidad else "")
+        self.campo_inquilino = QLineEdit(unidad["inquilino"] if unidad else "")
+        self.campo_importe = QLineEdit(unidad["importe"] if unidad else "0")
+        depto_actual = next((t for t, i in self._ids_deptos.items() if unidad and i and i == unidad["depto_id"]), NINGUNO)
+
+        self._grilla.addWidget(QLabel("Celda en la planilla (ej. B12):"), 0, 0)
+        self._grilla.addWidget(self.campo_celda, 0, 1)
+
+        self._grilla.addWidget(QLabel("Tipo de unidad:"), 1, 0)
+        self.combo_tipo = QComboBox()
+        self.combo_tipo.addItems([nombre_tipo(t) for t in TIPOS])
+        self.combo_tipo.setCurrentText(nombre_tipo(tipo_actual))
+        _estilizar_combo(self.combo_tipo)
+        self.combo_tipo.currentIndexChanged.connect(self._actualizar_tipo)
+        self._grilla.addWidget(self.combo_tipo, 1, 1)
+
+        self.lbl_piso = QLabel("")
+        self._grilla.addWidget(self.lbl_piso, 2, 0)
+        self._grilla.addWidget(self.campo_piso, 2, 1)
+        self.lbl_unidad = QLabel("")
+        self._grilla.addWidget(self.lbl_unidad, 3, 0)
+        self._grilla.addWidget(self.campo_unidad, 3, 1)
+        self._grilla.addWidget(QLabel("Unidad funcional (UF):"), 4, 0)
+        self._grilla.addWidget(self.campo_uf, 4, 1)
+
+        self.lbl_depto = QLabel("Pertenece al depto:")
+        self._grilla.addWidget(self.lbl_depto, 5, 0)
+        self.combo_depto = QComboBox()
+        self.combo_depto.addItems(list(self._ids_deptos))
+        self.combo_depto.setCurrentText(depto_actual)
+        _estilizar_combo(self.combo_depto)
+        self.combo_depto.currentIndexChanged.connect(self._al_elegir_depto)
+        self._grilla.addWidget(self.combo_depto, 5, 1)
+
+        self._grilla.addWidget(QLabel("Dueño:"), 6, 0)
+        self._grilla.addWidget(self.campo_dueno, 6, 1)
+        self._grilla.addWidget(QLabel("Inquilino:"), 7, 0)
+        self._grilla.addWidget(self.campo_inquilino, 7, 1)
+        self.lbl_importe = QLabel("Importe:")
+        self._grilla.addWidget(self.lbl_importe, 8, 0)
+        self._grilla.addWidget(self.campo_importe, 8, 1)
+        if self.unidad:   # al editar, el importe no se toca acá: se carga desde la planilla de pagos
+            self.lbl_importe.hide()
+            self.campo_importe.hide()
+
+        # --- depto: lista de cocheras/bauleras asociadas ---
+        self.frame_asociadas = QWidget()
+        frame_layout = QVBoxLayout(self.frame_asociadas)
+        frame_layout.setContentsMargins(0, 8, 0, 0)
+        frame_layout.setSpacing(4)
+        titulo_asoc = QLabel("Cocheras y bauleras de este depto:")
+        titulo_asoc.setStyleSheet(f"color: {COLOR_TEXTO}; font-weight: 700; background: transparent;")
+        frame_layout.addWidget(titulo_asoc)
+        nota_asoc = QLabel("Elegí una y abajo cómo paga: aparte, junto con el depto (un solo recibo) "
+                           "o incluida en su total.\nQuitar la suelta del depto, no la borra.")
+        nota_asoc.setStyleSheet(f"color: {COLOR_TEXTO_SUAVE}; font-size: 10px; background: transparent;")
+        nota_asoc.setWordWrap(True)
+        frame_layout.addWidget(nota_asoc)
+        self.lista_asociadas = QListWidget()
+        self.lista_asociadas.setObjectName("listaSimple")
+        self.lista_asociadas.setFixedHeight(90)
+        self.lista_asociadas.currentRowChanged.connect(lambda _f: self._mostrar_modo_item())
+        frame_layout.addWidget(self.lista_asociadas)
+        if unidad:
+            for h, n in ordenar_con_asociadas(todas):
+                if n == 1 and h["depto_id"] == unidad["id"]:
+                    self._agregar_item("actual", etiqueta_unidad(h).split(" (")[0], modo=modo_pago(h), id=h["id"])
+        barra = QHBoxLayout()
+        boton_vincular = QPushButton("Vincular existente")
+        boton_vincular.clicked.connect(self._vincular_existente)
+        boton_cochera = QPushButton("+ Cochera nueva")
+        boton_cochera.clicked.connect(lambda: self._nueva_asociada(COCHERA))
+        boton_baulera = QPushButton("+ Baulera nueva")
+        boton_baulera.clicked.connect(lambda: self._nueva_asociada(BAULERA))
+        boton_quitar = QPushButton("Quitar")
+        boton_quitar.clicked.connect(self._quitar_asociada)
+        barra.addWidget(boton_vincular)
+        barra.addWidget(boton_cochera)
+        barra.addWidget(boton_baulera)
+        barra.addWidget(boton_quitar)
+        barra.addStretch()
+        frame_layout.addLayout(barra)
+        fila_modo = QHBoxLayout()
+        fila_modo.addWidget(QLabel("Cómo paga la elegida:"))
+        self.combo_modo_item = QComboBox()
+        self.combo_modo_item.addItem("")
+        self.combo_modo_item.addItems([largo for _c, largo, _k in MODOS_PAGO])
+        _estilizar_combo(self.combo_modo_item)
+        self.combo_modo_item.currentIndexChanged.connect(self._fijar_modo_item)
+        fila_modo.addWidget(self.combo_modo_item)
+        frame_layout.addLayout(fila_modo)
+        layout.addWidget(self.frame_asociadas)
+
+        # Cochera/baulera: "cómo paga" propio (ocupa el lugar de la lista, que solo se ve en un depto)
+        self.fila_modo_asoc = QWidget()
+        fila_modo_asoc_layout = QHBoxLayout(self.fila_modo_asoc)
+        fila_modo_asoc_layout.setContentsMargins(0, 8, 0, 0)
+        fila_modo_asoc_layout.addWidget(QLabel("Cómo paga:"))
+        self.combo_modo_asoc = QComboBox()
+        self.combo_modo_asoc.addItems([largo for _c, largo, _k in MODOS_PAGO])
+        self.combo_modo_asoc.setCurrentText(_TEXTO_MODO[modo_pago(unidad) if unidad else MODO_APARTE])
+        _estilizar_combo(self.combo_modo_asoc)
+        fila_modo_asoc_layout.addWidget(self.combo_modo_asoc)
+        fila_modo_asoc_layout.addStretch()
+        layout.addWidget(self.fila_modo_asoc)
+
+        botones = QHBoxLayout()
+        boton_guardar = QPushButton("Guardar")
+        boton_guardar.setObjectName("botonAcento")
+        boton_guardar.clicked.connect(self._guardar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_guardar)
+        botones.addWidget(boton_cancelar)
+        if unidad:
+            boton_borrar = QPushButton("Borrar unidad")
+            boton_borrar.setStyleSheet("background-color: #dc2626; color: white; border: none;")
+            boton_borrar.clicked.connect(self._borrar)
+            botones.addSpacing(18)
+            botones.addWidget(boton_borrar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+        self._actualizar_tipo()
+
+    def _tipo(self):
+        indice = self.combo_tipo.currentIndex()
+        return TIPOS[indice] if indice >= 0 else DEPTO
+
+    def _actualizar_tipo(self):
+        tipo = self._tipo()
+        self.lbl_piso.setText("Piso (ej: PB, 1°):" if tipo == DEPTO else "Piso (opcional):")
+        self.lbl_unidad.setText({
+            DEPTO: "Letra o número del depto:", LOCAL: "Letra o número del local:",
+            COCHERA: "Número de cochera:", BAULERA: "Número de baulera:",
+        }[tipo])
+        asociable = tipo in TIPOS_ASOCIABLES
+        self.lbl_depto.setVisible(asociable)
+        self.combo_depto.setVisible(asociable)
+        self.frame_asociadas.setVisible(tipo == DEPTO)
+        self.fila_modo_asoc.setVisible(asociable)
+        self._actualizar_junto_asoc()
+
+    def _actualizar_junto_asoc(self):
+        con_depto = bool(self._ids_deptos.get(self.combo_depto.currentText(), ""))
+        self.combo_modo_asoc.setEnabled(con_depto)
+        if not con_depto:
+            self.combo_modo_asoc.setCurrentText(_TEXTO_MODO[MODO_APARTE])
+
+    def _al_elegir_depto(self):
+        self._actualizar_junto_asoc()
+        depto = self._por_id.get(self._ids_deptos.get(self.combo_depto.currentText(), ""))
+        if not depto:
+            return
+        actual = self.campo_inquilino.text().strip()
+        if not actual or actual == self._autoinquilino:
+            self.campo_inquilino.setText(depto["inquilino"])
+        self._autoinquilino = depto["inquilino"]
+
+    @staticmethod
+    def _texto_item(it):
+        estado = {"actual": "", "vincular": "  (existente)", "nueva": "  (nueva)"}[it["estado"]]
+        return f"{it['nombre']}{estado}   ·   {_CORTO_MODO[it['modo']]}"
+
+    def _agregar_item(self, estado, nombre, modo=MODO_APARTE, **extra):
+        """
+        estado: 'actual' (ya es del depto), 'vincular' (existente que se suma) o 'nueva' (se crea al guardar).
+        modo: cómo paga (MODO_APARTE / MODO_JUNTO / MODO_TOTAL); 'modo_orig' es cómo estaba guardada.
+        """
+        self._items.append(dict(extra, estado=estado, nombre=nombre, modo=modo, modo_orig=modo))
+        self.lista_asociadas.addItem(self._texto_item(self._items[-1]))
+
+    def _mostrar_modo_item(self):
+        fila = self.lista_asociadas.currentRow()
+        self.combo_modo_item.blockSignals(True)
+        self.combo_modo_item.setCurrentText(_TEXTO_MODO[self._items[fila]["modo"]] if fila >= 0 else "")
+        self.combo_modo_item.blockSignals(False)
+
+    def _fijar_modo_item(self):
+        """Cambia cómo paga la cochera/baulera elegida en la lista (texto largo del combo)."""
+        texto = self.combo_modo_item.currentText()
+        if not texto:
+            return
+        fila = self.lista_asociadas.currentRow()
+        if fila < 0:
+            QMessageBox.information(self, "Cómo paga", "Elegí primero la cochera o baulera de la lista.")
+            self.combo_modo_item.setCurrentText("")
+            return
+        self._items[fila]["modo"] = _CODIGO_MODO[texto]
+        self.lista_asociadas.item(fila).setText(self._texto_item(self._items[fila]))
+
+    def _nueva_asociada(self, tipo):
+        DialogoAsociada(self, tipo, self._agregar_asociada).show()
+
+    def _agregar_asociada(self, datos):
+        nombre = " ".join(p for p in (nombre_tipo(datos["tipo"]), datos["piso"], datos["unidad"]) if p)
+        self._agregar_item("nueva", f"{nombre} — {format_currency_ar(datos['importe'])}",
+                           modo=datos.get("paga_junto") or MODO_APARTE, datos=datos)
+
+    def _vincular_existente(self):
+        en_lista = {it["id"] for it in self._items if "id" in it}
+        propio = self.unidad["id"] if self.unidad else None
+        candidatas = [
+            (u["id"], etiqueta_unidad(u)) for u, _n in ordenar_con_asociadas(database.get_unidades_por_edificio(self.edificio))
+            if normalizar_tipo(u["tipo"]) in TIPOS_ASOCIABLES and u["id"] not in en_lista
+            and (not u["depto_id"] or u["id"] in self._a_desvincular) and u["id"] != propio
+        ]
+        if not candidatas:
+            QMessageBox.information(
+                self, "Vincular existente",
+                "No hay cocheras ni bauleras sueltas en este edificio.\n"
+                "Podés crear una con '+ Cochera nueva' o '+ Baulera nueva'.")
+            return
+        DialogoElegirAsociada(self, candidatas, self._agregar_vinculadas).show()
+
+    def _agregar_vinculadas(self, elegidas):
+        for uid, nombre in elegidas:
+            if uid in self._a_desvincular:      # la había soltado hace un rato: vuelve a quedar como estaba
+                self._a_desvincular.remove(uid)
+                self._agregar_item("actual", nombre, modo=modo_pago(self._por_id[uid]), id=uid)
+            else:
+                self._agregar_item("vincular", nombre, id=uid)
+
+    def _quitar_asociada(self):
+        fila = self.lista_asociadas.currentRow()
+        if fila < 0:
+            QMessageBox.information(self, "Quitar", "Elegí primero la cochera o baulera de la lista.")
+            return
+        item = self._items.pop(fila)
+        self.lista_asociadas.takeItem(fila)
+        if item["estado"] == "actual":
+            self._a_desvincular.append(item["id"])
+        self._mostrar_modo_item()
+
+    def _borrar(self):
+        def al_borrar():
+            if self.on_guardar:
+                self.on_guardar()
+            self.accept()
+        confirmar_y_borrar(self, self.unidad["id"], on_borrado=al_borrar)
+
+    def _guardar(self):
+        tipo = self._tipo()
+        piso = self.campo_piso.text().strip()
+        unidad_txt = self.campo_unidad.text().strip()
+        inquilino = self.campo_inquilino.text().strip()
+        importe = parse_importe(self.campo_importe.text())
+
+        if tipo == DEPTO and (not piso or not unidad_txt):
+            QMessageBox.warning(self, "Datos incompletos", "Completá al menos 'Piso' y la letra o número del depto.")
+            return
+        if not unidad_txt:
+            QMessageBox.warning(self, "Datos incompletos", "Completá la letra o número de la unidad.")
+            return
+
+        try:
+            celda = pagos.normalizar_celda(self.campo_celda.text())
+        except ValueError as e:
+            QMessageBox.warning(self, "Celda inválida", str(e))
+            return
+
+        depto_id = self._ids_deptos.get(self.combo_depto.currentText(), "") if tipo in TIPOS_ASOCIABLES else ""
+        items = self._items if tipo == DEPTO else []
+        asociadas = [dict(it["datos"], inquilino=inquilino, paga_junto=it["modo"]) for it in items if it["estado"] == "nueva"]
+        a_vincular = [it for it in items if it["estado"] == "vincular"]
+        a_cambiar = [it for it in items if it["estado"] == "actual" and it["modo"] != it["modo_orig"]]
+        uf, dueno = self.campo_uf.text().strip(), self.campo_dueno.text().strip()
+        # solo una cochera/baulera de un depto tiene "cómo paga"; una incluida en el total no lleva celda propia
+        modo = _CODIGO_MODO[self.combo_modo_asoc.currentText()] if depto_id else MODO_APARTE
+        if modo == MODO_TOTAL:
+            celda = ""
+
+        nuevas_celdas = ([celda] if celda else []) + [a["celda"] for a in asociadas if a.get("celda")]
+        if nuevas_celdas and not confirmar_modo_celdas(self, self.edificio):
+            return
+
+        def guardar_de_verdad():
+            try:
+                if self.unidad:
+                    database.update_unidad(
+                        self.unidad["id"],
+                        piso=piso, tipo=tipo, unidad=unidad_txt, uf=uf, dueno=dueno,
+                        inquilino=inquilino, depto_id=depto_id,
+                        paga_junto=modo, celda=celda,
+                    )
+                    depto_propio = self.unidad["id"]
+                    for asociada_id in self._a_desvincular:
+                        database.update_unidad(asociada_id, depto_id="")
+                    if asociadas:
+                        database.add_asociadas(depto_propio, asociadas)
+                else:
+                    depto_propio = database.add_unidad(self.edificio, piso, tipo, unidad_txt, inquilino, importe,
+                                                       depto_id=depto_id, asociadas=asociadas, uf=uf, dueno=dueno,
+                                                       paga_junto=modo, celda=celda)
+                for it in a_vincular:
+                    campos = {"depto_id": depto_propio, "paga_junto": it["modo"]}
+                    if not self._por_id[it["id"]]["inquilino"]:
+                        campos["inquilino"] = inquilino
+                    database.update_unidad(it["id"], **campos)
+                for it in a_cambiar:
+                    database.update_unidad(it["id"], paga_junto=it["modo"])
+
+                mostrar_avisos(self)
+                if self.on_guardar:
+                    self.on_guardar()
+                self.accept()
+            except Exception as e:
+                manejar_error("No se pudo guardar la unidad", e, self)
+
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar una unidad")
+
+
+# ===========================================================================
+# Diálogo: alta de edificio
+# ===========================================================================
+
+class DialogoEdificioNuevo(QDialog):
+    def __init__(self, parent, on_guardar=None):
+        super().__init__(parent)
+        self.on_guardar = on_guardar
+        self.setWindowTitle("Nuevo edificio")
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        layout.addWidget(QLabel("Nombre del edificio:"))
+        self.campo_nombre = QLineEdit()
+        layout.addWidget(self.campo_nombre)
+        self.campo_nombre.setFocus()
+
+        botones = QHBoxLayout()
+        boton_crear = QPushButton("Crear")
+        boton_crear.setObjectName("botonAcento")
+        boton_crear.clicked.connect(self._guardar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_crear)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _guardar(self):
+        nombre = self.campo_nombre.text().strip()
+        if not nombre:
+            QMessageBox.warning(self, "Datos incompletos", "Ingresá un nombre de edificio.")
+            return
+
+        def guardar_de_verdad():
+            try:
+                database.add_edificio(nombre)
+                mostrar_avisos(self)
+                if self.on_guardar:
+                    self.on_guardar(nombre)
+                self.accept()
+            except Exception as e:
+                manejar_error("No se pudo crear el edificio", e, self)
+
+        requerir_maestro(self, guardar_de_verdad, motivo="crear un edificio")
+
+
+# ===========================================================================
+# Diálogo: datos del consorcio (nombre, dirección, CUIT y administrador)
+# ===========================================================================
+
+class DialogoDatosConsorcio(QDialog):
+    def __init__(self, parent, nombre_edificio, on_guardar=None):
+        super().__init__(parent)
+        self.nombre_original = nombre_edificio
+        self.on_guardar = on_guardar
+        datos = database.get_edificio(nombre_edificio) or {}
+
+        self.setWindowTitle("Datos del consorcio")
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(6)
+
+        grupos = [
+            ("Consorcio", [
+                ("nombre", "Nombre:"), ("direccion", "Dirección:"),
+                ("localidad", "Localidad:"), ("cuit", "CUIT del consorcio:"),
+            ]),
+            ("Administrador", [
+                ("admin_nombre", "Nombre del administrador:"),
+                ("admin_cuit", "CUIT del administrador:"), ("admin_rpac", "RPAC:"),
+            ]),
+        ]
+        self.campos = {}
+        for titulo, campos in grupos:
+            etiqueta_grupo = QLabel(titulo)
+            etiqueta_grupo.setStyleSheet(f"color: {COLOR_ACENTO}; font-weight: 700; background: transparent;")
+            layout.addWidget(etiqueta_grupo)
+            grilla = QGridLayout()
+            grilla.setHorizontalSpacing(10)
+            grilla.setVerticalSpacing(6)
+            for fila, (clave, etiqueta) in enumerate(campos):
+                grilla.addWidget(QLabel(etiqueta), fila, 0)
+                campo = QLineEdit(datos.get(clave, ""))
+                grilla.addWidget(campo, fila, 1)
+                self.campos[clave] = campo
+            layout.addLayout(grilla)
+
+        nota = QLabel("Si cambiás el nombre, se actualiza en las unidades, el historial, la numeración,\n"
+                      "la carpeta de recibos y la planilla de pagos.")
+        nota.setStyleSheet(f"color: {COLOR_TEXTO_SUAVE}; font-size: 10px; background: transparent;")
+        layout.addWidget(nota)
+
+        botones = QHBoxLayout()
+        boton_guardar = QPushButton("Guardar")
+        boton_guardar.setObjectName("botonAcento")
+        boton_guardar.clicked.connect(self._guardar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_guardar)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _guardar(self):
+        datos = {clave: campo.text().strip() for clave, campo in self.campos.items()}
+        if not datos["nombre"]:
+            QMessageBox.warning(self, "Datos incompletos", "El nombre del consorcio no puede quedar vacío.")
+            return
+        try:
+            datos["cuit"] = normalizar_cuit(datos["cuit"])
+            datos["admin_cuit"] = normalizar_cuit(datos["admin_cuit"])
+        except ValueError as e:
+            QMessageBox.warning(self, "CUIT inválido", str(e))
+            return
+
+        if datos["nombre"] != self.nombre_original:
+            confirmado = QMessageBox.question(
+                self, "Cambiar el nombre del consorcio",
+                f"Vas a cambiar el nombre de «{self.nombre_original}» a «{datos['nombre']}».\n\n"
+                "Se actualiza en las unidades, el historial, la numeración de recibos, la carpeta de "
+                "recibos y la planilla de pagos.\nCerrá la planilla de Excel y los PDF de este consorcio "
+                "si están abiertos.\n\n¿Continuar?",
+            )
+            if confirmado != QMessageBox.Yes:
+                return
+
+        def guardar_de_verdad():
+            try:
+                nombre_final = database.update_edificio(self.nombre_original, **datos)
+            except PermissionError:
+                QMessageBox.warning(
+                    self, "Archivos abiertos",
+                    "No se pudo cambiar el nombre porque hay archivos abiertos de este consorcio "
+                    "(la planilla de pagos en Excel o algún PDF de sus recibos).\n\n"
+                    "Cerralos y probá de nuevo. No se modificó nada.")
+                return
+            except ValueError as e:
+                QMessageBox.warning(self, "No se pudo guardar", str(e))
+                return
+            except Exception as e:
+                manejar_error("No se pudieron guardar los datos del consorcio", e, self)
+                return
+
+            mostrar_avisos(self)
+            if self.on_guardar:
+                self.on_guardar(nombre_final)
+            self.accept()
+
+        requerir_maestro(self, guardar_de_verdad, motivo="editar los datos del consorcio")
+
+
+# ===========================================================================
+# Diálogo: borrar un edificio (se archiva, no se pierde)
+# ===========================================================================
+
+class DialogoBorrarEdificio(QDialog):
+    """Muestra qué tiene el edificio y pide escribir su nombre para confirmar el borrado."""
+
+    def __init__(self, parent, edificio, on_borrado=None):
+        super().__init__(parent)
+        self.edificio = edificio
+        self.on_borrado = on_borrado
+        self.setWindowTitle("Borrar edificio")
+        self.setModal(True)
+
+        r = database.resumen_edificio(edificio)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        titulo = QLabel(f"Borrar «{edificio}»")
+        titulo.setStyleSheet("color: #f87171; font-weight: 700; background: transparent;")
+        layout.addWidget(titulo)
+
+        detalle = QLabel(
+            f"Tiene {r['unidades']} unidad(es), {r['recibos']} recibo(s) en el historial y "
+            f"{r['pdfs']} PDF.\n\nDeja de aparecer en la app. Sus unidades, historial, numeración, carpeta de "
+            "recibos y planilla de pagos NO se pierden: se guardan en datos/edificios_borrados/ para "
+            "poder recuperarlos a mano.\n\nCerrá la planilla de Excel y los PDF de este edificio si están abiertos.")
+        detalle.setWordWrap(True)
+        layout.addWidget(detalle)
+
+        layout.addWidget(QLabel("Para confirmar, escribí el nombre del edificio:"))
+        self.campo_nombre = QLineEdit()
+        self.campo_nombre.textChanged.connect(self._validar)
+        layout.addWidget(self.campo_nombre)
+        self.campo_nombre.setFocus()
+
+        botones = QHBoxLayout()
+        self.boton_borrar = QPushButton("Borrar edificio")
+        self.boton_borrar.setStyleSheet("background-color: #dc2626; color: white; border: none;")
+        self.boton_borrar.setEnabled(False)
+        self.boton_borrar.clicked.connect(self._borrar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(self.boton_borrar)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _validar(self):
+        self.boton_borrar.setEnabled(self.campo_nombre.text().strip() == self.edificio)
+
+    def _borrar(self):
+        if self.campo_nombre.text().strip() != self.edificio:
+            return
+
+        def borrar_de_verdad():
+            try:
+                destino = database.delete_edificio(self.edificio)
+            except PermissionError:
+                QMessageBox.warning(
+                    self, "Archivos abiertos",
+                    "No se pudo borrar porque hay archivos abiertos de este edificio (la planilla de pagos en "
+                    "Excel o algún PDF de sus recibos).\n\nCerralos y probá de nuevo. No se modificó nada.")
+                return
+            except ValueError as e:
+                QMessageBox.warning(self, "No se pudo borrar", str(e))
+                return
+            except Exception as e:
+                manejar_error("No se pudo borrar el edificio", e, self)
+                return
+            self.accept()
+            if self.on_borrado:
+                self.on_borrado(destino)
+
+        requerir_maestro(self, borrar_de_verdad, motivo="borrar un edificio")
+
+
+# ===========================================================================
+# Ventana: asignar la celda de la planilla de pagos a cada unidad
+# ===========================================================================
+
+SIN_CELDA = "Sin celda"
+
+
+class VentanaAsignarCeldas(QDialog):
+    """Una fila por unidad del edificio con la celda donde figura en la planilla de pagos."""
+
+    def __init__(self, parent, edificio, on_guardar=None):
+        super().__init__(parent)
+        self.edificio = edificio
+        self.on_guardar = on_guardar
+        self.setWindowTitle("Asignar celdas de la planilla")
+        self.setModal(True)
+        self.resize(520, 560)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        titulo = QLabel(f"Edificio: {edificio}")
+        titulo.setStyleSheet(f"color: {COLOR_TEXTO}; font-weight: 700; background: transparent;")
+        layout.addWidget(titulo)
+
+        nota = QLabel(
+            "Escribí, para cada unidad, la celda donde está su nombre en la planilla (ej. B12).\n"
+            "Los montos se leen de las 4 celdas de la derecha: Total a pagar, Monto deuda, Monto pagado y Tipo pago.\n"
+            "Dejala vacía si la unidad no figura.")
+        nota.setStyleSheet(f"color: {COLOR_TEXTO_SUAVE}; font-size: 10px; background: transparent;")
+        nota.setWordWrap(True)
+        layout.addWidget(nota)
+
+        tabla = QTableWidget(0, 2)
+        tabla.setObjectName("listaSimple")
+        tabla.horizontalHeader().hide()
+        tabla.verticalHeader().hide()
+        tabla.setShowGrid(False)
+        tabla.setEditTriggers(QAbstractItemView.AllEditTriggers)
+        tabla.setSelectionMode(QAbstractItemView.NoSelection)
+        layout.addWidget(tabla, 1)
+
+        todas = database.get_unidades_por_edificio(edificio)
+        por_id = indice_por_id(todas)
+        self._antes = {u["id"]: u["celda"] for u in todas}
+        filas = [(u, n) for u, n in ordenar_con_asociadas(todas) if not incluida_en_total(u)]
+        tabla.setRowCount(len(filas))
+        self._campos_celda = {}
+        for fila, (u, nivel) in enumerate(filas):
+            texto = ("      " if nivel else "") + f"{nombre_tipo(normalizar_tipo(u['tipo']))} — {etiqueta_unidad(u, por_id)}"
+            item = QTableWidgetItem(texto)
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            tabla.setItem(fila, 0, item)
+            campo = QLineEdit(u["celda"])
+            tabla.setCellWidget(fila, 1, campo)
+            self._campos_celda[u["id"]] = campo
+        tabla.resizeColumnToContents(0)
+        if not filas:
+            layout.addWidget(QLabel("Este edificio todavía no tiene unidades."))
+
+        botones = QHBoxLayout()
+        boton_guardar = QPushButton("Guardar")
+        boton_guardar.setObjectName("botonAcento")
+        boton_guardar.clicked.connect(self._guardar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_guardar)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _guardar(self):
+        try:
+            celdas = {uid: pagos.normalizar_celda(campo.text()) for uid, campo in self._campos_celda.items()}
+        except ValueError as e:
+            QMessageBox.warning(self, "Celda inválida", str(e))
+            return
+        habia, habra = any(self._antes.values()), any(celdas.values())
+        if habra and not habia and not confirmar_modo_celdas(self, self.edificio):
+            return
+        if habia and not habra:
+            confirmado = QMessageBox.question(
+                self, "Volver a la planilla automática",
+                "Sin ninguna celda asignada, la app vuelve a armar su propia planilla de pagos en ese archivo "
+                "(antes guarda una copia de tu Excel con el nombre «..._respaldo_...»).\n\n¿Continuar?",
+            )
+            if confirmado != QMessageBox.Yes:
+                return
+
+        def guardar_de_verdad():
+            try:
+                database.set_celdas(self.edificio, celdas)
+            except ValueError as e:
+                QMessageBox.warning(self, "No se pudo guardar", str(e))
+                return
+            except Exception as e:
+                manejar_error("No se pudieron guardar las celdas", e, self)
+                return
+            if habia and not habra:
+                try:
+                    database.sincronizar_pagos(self.edificio, reemplazar_ajena=True)
+                except PermissionError:
+                    QMessageBox.warning(
+                        self, "Planilla abierta",
+                        "Se quitaron las celdas, pero la planilla está abierta en Excel y no se pudo rearmar.\n"
+                        "Cerrala: se rearma sola la próxima vez que se guarde algo.")
+                except Exception as e:
+                    manejar_error("No se pudo rearmar la planilla de pagos", e, self)
+            if self.on_guardar:
+                self.on_guardar()
+            self.accept()
+
+        requerir_maestro(self, guardar_de_verdad, motivo="asignar celdas de la planilla")
+
+
+# ===========================================================================
+# Ventana: administración de edificios / unidades
+# ===========================================================================
+
+COLUMNAS_ADMIN = ("piso", "tipo", "unidad", "uf", "depto", "dueno", "inquilino", "importe", "celda")
+TITULOS_ADMIN = {"piso": "PISO", "tipo": "TIPO", "unidad": "LETRA/N°", "uf": "UF", "depto": "PERTENECE A",
+                 "dueno": "DUEÑO", "inquilino": "INQUILINO", "importe": "IMPORTE", "celda": "CELDA"}
+ANCHOS_ADMIN = {"piso": 60, "tipo": 80, "unidad": 80, "uf": 50, "depto": 110, "dueno": 130, "inquilino": 130,
+                "importe": 100, "celda": 70}
+
+
+class VentanaAdministracion(QDialog):
+    def __init__(self, parent, edificio_inicial, on_cambios=None):
+        super().__init__(parent)
+        self.on_cambios = on_cambios
+        self.setWindowTitle("Administrar edificios y unidades")
+        self.setModal(True)
+        self.resize(1080, 560)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        top.addWidget(QLabel("Edificio:"))
+        self.combo_edificio = QComboBox()
+        self.combo_edificio.addItems(database.get_nombres_edificios())
+        self.combo_edificio.setCurrentText(edificio_inicial)
+        self.combo_edificio.setMinimumWidth(240)
+        _estilizar_combo(self.combo_edificio)
+        self.combo_edificio.currentIndexChanged.connect(self._recargar)
+        top.addWidget(self.combo_edificio)
+
+        boton_datos = QPushButton("Datos del consorcio")
+        boton_datos.setObjectName("botonAcento")
+        boton_datos.clicked.connect(self._datos_consorcio)
+        boton_nuevo_ed = QPushButton("+ Nuevo edificio")
+        boton_nuevo_ed.clicked.connect(self._nuevo_edificio)
+        boton_borrar_ed = QPushButton("Borrar edificio")
+        boton_borrar_ed.setStyleSheet("background-color: #dc2626; color: white; border: none;")
+        boton_borrar_ed.clicked.connect(self._borrar_edificio)
+        boton_nueva_un = QPushButton("+ Nueva unidad")
+        boton_nueva_un.clicked.connect(self._nueva_unidad)
+        boton_celdas = QPushButton("Asignar celdas")
+        boton_celdas.clicked.connect(self._asignar_celdas)
+        boton_carpeta = QPushButton("Abrir carpeta del edificio")
+        boton_carpeta.clicked.connect(self._abrir_carpeta)
+        for b in (boton_datos, boton_nuevo_ed, boton_borrar_ed, boton_nueva_un, boton_celdas, boton_carpeta):
+            top.addWidget(b)
+        top.addStretch()
+        layout.addLayout(top)
+
+        self.tabla = QTableWidget(0, len(COLUMNAS_ADMIN))
+        self.tabla.setHorizontalHeaderLabels([TITULOS_ADMIN[c] for c in COLUMNAS_ADMIN])
+        self.tabla.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tabla.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tabla.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tabla.setShowGrid(False)
+        self.tabla.setAlternatingRowColors(True)
+        self.tabla.verticalHeader().setVisible(False)
+        self.tabla.verticalHeader().setDefaultSectionSize(30)
+        self.tabla.horizontalHeader().setFixedHeight(32)
+        for col, clave in enumerate(COLUMNAS_ADMIN):
+            self.tabla.setColumnWidth(col, ANCHOS_ADMIN[clave])
+        for clave in ("dueno", "inquilino"):
+            self.tabla.horizontalHeader().setSectionResizeMode(COLUMNAS_ADMIN.index(clave), QHeaderView.Stretch)
+        self.tabla.doubleClicked.connect(lambda _i: self._editar_seleccionada())
+        layout.addWidget(self.tabla, 1)
+
+        pie = QHBoxLayout()
+        boton_editar = QPushButton("Editar unidad seleccionada")
+        boton_editar.clicked.connect(self._editar_seleccionada)
+        boton_borrar_un = QPushButton("Borrar unidad seleccionada")
+        boton_borrar_un.setStyleSheet("background-color: #dc2626; color: white; border: none;")
+        boton_borrar_un.clicked.connect(self._borrar_seleccionada)
+        nota = QLabel("(doble clic sobre una fila también la edita)")
+        nota.setStyleSheet(f"color: {COLOR_TEXTO_SUAVE}; font-size: 10px; background: transparent;")
+        pie.addWidget(boton_editar)
+        pie.addWidget(boton_borrar_un)
+        pie.addWidget(nota)
+        pie.addStretch()
+        layout.addLayout(pie)
+
+        self._unidades_por_fila = {}
+        self._recargar()
+
+    def _recargar(self):
+        self.tabla.setRowCount(0)
+        self._unidades_por_fila = {}
+
+        edificio = self.combo_edificio.currentText()
+        todas = database.get_unidades_por_edificio(edificio)
+        por_id = indice_por_id(todas)
+        filas = ordenar_con_asociadas(todas)
+        self.tabla.setRowCount(len(filas))
+        for fila, (u, nivel) in enumerate(filas):
+            importe_fmt = format_currency_ar(parse_importe(u["importe"]))
+            depto = depto_de(u, por_id)
+            valores = {
+                "piso": u["piso"], "tipo": normalizar_tipo(u["tipo"]),
+                "unidad": ("↳ " if nivel else "") + u["unidad"], "uf": u["uf"],
+                "depto": etiqueta_unidad(depto) if depto else "", "dueno": u["dueno"],
+                "inquilino": u["inquilino"], "importe": importe_fmt, "celda": u["celda"],
+            }
+            for col, clave in enumerate(COLUMNAS_ADMIN):
+                item = QTableWidgetItem(valores[clave])
+                item.setTextAlignment(Qt.AlignCenter if clave not in ("dueno", "inquilino") else Qt.AlignVCenter)
+                self.tabla.setItem(fila, col, item)
+            self._unidades_por_fila[fila] = u
+
+        if self.on_cambios:
+            self.on_cambios(edificio)
+
+    def _seleccionada(self):
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            return None
+        return self._unidades_por_fila.get(filas[0].row())
+
+    def _asignar_celdas(self):
+        edificio = self.combo_edificio.currentText()
+        if not edificio:
+            QMessageBox.warning(self, "Atención", "Primero seleccioná o creá un edificio.")
+            return
+        VentanaAsignarCeldas(self, edificio, on_guardar=self._recargar).show()
+
+    def _datos_consorcio(self):
+        edificio = self.combo_edificio.currentText()
+        if not edificio:
+            QMessageBox.warning(self, "Atención", "Primero seleccioná o creá un edificio.")
+            return
+
+        def al_guardar(nombre_nuevo):
+            self._refrescar_combo_edificios(nombre_nuevo)
+
+        DialogoDatosConsorcio(self, edificio, on_guardar=al_guardar).show()
+
+    def _borrar_seleccionada(self):
+        unidad = self._seleccionada()
+        if not unidad:
+            QMessageBox.information(self, "Borrar unidad", "Seleccioná primero una unidad de la lista.")
+            return
+        confirmar_y_borrar(self, unidad["id"], on_borrado=self._recargar)
+
+    def _nuevo_edificio(self):
+        def al_guardar(nombre):
+            self._refrescar_combo_edificios(nombre)
+        DialogoEdificioNuevo(self, on_guardar=al_guardar).show()
+
+    def _refrescar_combo_edificios(self, nombre_a_elegir):
+        self.combo_edificio.blockSignals(True)
+        self.combo_edificio.clear()
+        self.combo_edificio.addItems(database.get_nombres_edificios())
+        self.combo_edificio.setCurrentText(nombre_a_elegir)
+        self.combo_edificio.blockSignals(False)
+        self._recargar()
+
+    def _borrar_edificio(self):
+        edificio = self.combo_edificio.currentText()
+        if not edificio:
+            QMessageBox.warning(self, "Atención", "Primero seleccioná un edificio.")
+            return
+
+        def al_borrar(destino):
+            nombres = database.get_nombres_edificios()
+            self.combo_edificio.blockSignals(True)
+            self.combo_edificio.clear()
+            self.combo_edificio.addItems(nombres)
+            if nombres:
+                self.combo_edificio.setCurrentIndex(0)
+            self.combo_edificio.blockSignals(False)
+            self._recargar()
+            QMessageBox.information(
+                self, "Edificio borrado",
+                f"Se borró «{edificio}».\n\nSus datos, recibos PDF y planilla quedaron guardados en:\n{destino}")
+
+        DialogoBorrarEdificio(self, edificio, on_borrado=al_borrar).show()
+
+    def _nueva_unidad(self):
+        edificio = self.combo_edificio.currentText()
+        if not edificio:
+            QMessageBox.warning(self, "Atención", "Primero seleccioná o creá un edificio.")
+            return
+        DialogoUnidad(self, edificio, unidad=None, on_guardar=self._recargar).show()
+
+    def _editar_seleccionada(self):
+        unidad = self._seleccionada()
+        if not unidad:
+            QMessageBox.information(self, "Editar unidad", "Seleccioná primero una unidad de la lista.")
+            return
+        DialogoUnidad(self, self.combo_edificio.currentText(), unidad=unidad, on_guardar=self._recargar).show()
+
+    def _abrir_carpeta(self):
+        edificio = self.combo_edificio.currentText()
+        if not edificio:
+            return
+        carpeta = database.carpeta_edificio(edificio)
+        if not abrir_carpeta_en_explorador(carpeta):
+            QMessageBox.information(self, "Carpeta del edificio", f"La carpeta es:\n{carpeta}")
+
+
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -280,8 +1774,20 @@ class App(QMainWindow):
         accion_salir.triggered.connect(self.close)
         menu_archivo.addAction(accion_salir)
 
+        menu_admin = self.menuBar().addMenu("Administrar")
+        accion_administrar = QAction("Administrar edificios/unidades", self)
+        accion_administrar.triggered.connect(self._abrir_administracion)
+        menu_admin.addAction(accion_administrar)
+        for nombre in ("Configuración de la inmobiliaria", "Mailing"):
+            accion = QAction(nombre, self)
+            accion.triggered.connect(lambda _, n=nombre: self._pendiente(n))
+            menu_admin.addAction(accion)
+        menu_admin.addSeparator()
+        accion_maestro = QAction("Control maestro", self)
+        accion_maestro.triggered.connect(self._abrir_control_maestro)
+        menu_admin.addAction(accion_maestro)
+
         for titulo, items in (
-            ("Administrar", ("Administrar edificios/unidades", "Configuración de la inmobiliaria", "Mailing")),
             ("Ver", ("Historial de recibos", "Historial de mails")),
             ("Ayuda", ("Recibo expensas", "Acerca de")),
         ):
@@ -290,6 +1796,18 @@ class App(QMainWindow):
                 accion = QAction(nombre, self)
                 accion.triggered.connect(lambda _, n=nombre: self._pendiente(n))
                 menu.addAction(accion)
+
+    def _abrir_control_maestro(self):
+        VentanaControlMaestro(self).show()
+
+    def _abrir_administracion(self):
+        def al_cambiar(edificio):
+            self._cargar_edificios()
+            coincidencias = self.lista_edificios.findItems(edificio, Qt.MatchExactly)
+            if coincidencias:
+                self.lista_edificios.setCurrentItem(coincidencias[0])
+
+        VentanaAdministracion(self, self._edificio_actual(), on_cambios=al_cambiar).show()
 
     def _pendiente(self, nombre):
         QMessageBox.information(self, nombre, "Todavía no está portado a esta versión de prueba (PySide6).")
