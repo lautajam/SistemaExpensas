@@ -15,7 +15,8 @@ misma lógica de negocio.
 
 import logging
 import os
-from datetime import date
+import shutil
+from datetime import date, datetime
 
 _DIR_RECURSOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recursos_qt").replace("\\", "/")
 
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -36,7 +38,9 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -44,17 +48,20 @@ from PySide6.QtWidgets import (
 )
 
 import config
+import correo
 import database
 import maestro
 import pagos
 from utils import (
     abrir_carpeta_en_explorador,
+    abrir_pdf,
     fecha_hoy_es,
     format_currency_ar,
     nombre_archivo_recibo,
     normalizar_cuit,
     obtener_periodos,
     parse_importe,
+    revelar_en_explorador,
 )
 from pdf_generator import generar_pdf_recibo
 from recibo import armar_datos as armar_datos_recibo
@@ -155,6 +162,16 @@ QLineEdit {{
 }}
 QLineEdit:focus {{ border-color: {COLOR_ACENTO}; }}
 
+QPlainTextEdit {{
+    background-color: {COLOR_TARJETA_ALT};
+    border: 1px solid {COLOR_BORDE};
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: {COLOR_TEXTO};
+    font-size: 12px;
+}}
+QPlainTextEdit:focus {{ border-color: {COLOR_ACENTO}; }}
+
 QFrame#separador {{ background-color: {COLOR_BORDE}; max-height: 1px; min-height: 1px; border: none; }}
 
 QComboBox {{
@@ -239,7 +256,7 @@ QPushButton#botonPrimario {{
 QPushButton#botonPrimario:hover {{ background-color: {COLOR_PRIMARIA_HOVER}; }}
 QPushButton#botonPrimario:pressed {{ background-color: #c2410c; }}
 
-QCheckBox {{ background: transparent; spacing: 0px; }}
+QCheckBox {{ background: transparent; color: {COLOR_TEXTO}; font-size: 12px; spacing: 8px; }}
 QCheckBox::indicator {{
     width: 16px; height: 16px;
     border: 1px solid {COLOR_BORDE};
@@ -681,6 +698,31 @@ def _estilizar_combo(combo):
             color: white;
         }}
     """)
+
+
+def _crear_sidebar_edificios(cuerpo, nombres, al_cambiar):
+    """Panel lateral fijo con la lista de edificios (QListWidget) para elegir/filtrar por uno,
+    igual que en la ventana principal: a diferencia de un QComboBox desplegable, el hover
+    funciona de forma confiable (ver ui_qt.py, historial de cambios del combo de edificios)."""
+    sidebar = QWidget()
+    sidebar.setObjectName("sidebar")
+    sidebar.setFixedWidth(220)
+    sidebar_layout = QVBoxLayout(sidebar)
+    sidebar_layout.setContentsMargins(16, 20, 16, 20)
+    sidebar_layout.setSpacing(10)
+
+    titulo = QLabel("EDIFICIOS")
+    titulo.setObjectName("tituloSidebar")
+    sidebar_layout.addWidget(titulo)
+
+    lista = QListWidget()
+    lista.setFocusPolicy(Qt.NoFocus)
+    lista.addItems(nombres)
+    lista.currentItemChanged.connect(lambda *_: al_cambiar())
+    sidebar_layout.addWidget(lista, 1)
+
+    cuerpo.addWidget(sidebar)
+    return lista
 
 
 # Cómo paga una cochera/baulera de un depto: (código guardado, texto para elegir, texto corto de la lista)
@@ -1735,6 +1777,1400 @@ class VentanaAdministracion(QDialog):
             QMessageBox.information(self, "Carpeta del edificio", f"La carpeta es:\n{carpeta}")
 
 
+# ===========================================================================
+# Ventana: configuración de la inmobiliaria
+# ===========================================================================
+
+class VentanaConfiguracion(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Configuración de la inmobiliaria")
+        self.setModal(True)
+
+        datos = database.get_inmobiliaria()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+
+        grilla = QGridLayout()
+        grilla.setHorizontalSpacing(10)
+        grilla.setVerticalSpacing(6)
+        self.campos = {}
+        for fila, (clave, etiqueta) in enumerate((
+            ("nombre", "Nombre de la inmobiliaria:"),
+            ("subtitulo", "Subtítulo:"),
+            ("direccion", "Dirección:"),
+            ("telefono", "Teléfono:"),
+            ("email", "Email:"),
+        )):
+            grilla.addWidget(QLabel(etiqueta), fila, 0)
+            campo = QLineEdit(datos.get(clave, ""))
+            grilla.addWidget(campo, fila, 1)
+            self.campos[clave] = campo
+        layout.addLayout(grilla)
+
+        # Logo y firma digital. Los cambios se aplican al apretar "Guardar".
+        self._imagenes = {}   # clave -> ruta elegida (str) o None si se quitó; ausente = sin cambios
+        self._vistas = {}     # clave -> QLabel con la vista previa
+        for clave, titulo in (("logo", "Logo:"), ("firma", "Firma digital:")):
+            fila_img = QHBoxLayout()
+            etiqueta = QLabel(titulo)
+            etiqueta.setFixedWidth(130)
+            fila_img.addWidget(etiqueta)
+
+            vista = QLabel()
+            vista.setFixedSize(200, 70)
+            vista.setAlignment(Qt.AlignCenter)
+            vista.setStyleSheet(
+                f"background-color: white; border: 1px solid {COLOR_BORDE}; "
+                f"border-radius: 6px; color: #666; font-size: 10px;")
+            fila_img.addWidget(vista)
+            self._vistas[clave] = vista
+
+            columna_botones = QVBoxLayout()
+            boton_elegir = QPushButton("Elegir imagen...")
+            boton_elegir.clicked.connect(lambda _, c=clave: self._elegir_imagen(c))
+            boton_quitar = QPushButton("Quitar")
+            boton_quitar.clicked.connect(lambda _, c=clave: self._quitar_imagen(c))
+            columna_botones.addWidget(boton_elegir)
+            columna_botones.addWidget(boton_quitar)
+            fila_img.addLayout(columna_botones)
+            fila_img.addStretch()
+            layout.addLayout(fila_img)
+            self._mostrar_vista(clave, database.imagen_inmobiliaria(clave))
+
+        botones = QHBoxLayout()
+        boton_guardar = QPushButton("Guardar")
+        boton_guardar.setObjectName("botonAcento")
+        boton_guardar.clicked.connect(self._guardar)
+        boton_cerrar = QPushButton("Cerrar")
+        boton_cerrar.clicked.connect(self.reject)
+        botones.addWidget(boton_guardar)
+        botones.addWidget(boton_cerrar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _mostrar_vista(self, clave, ruta):
+        """Muestra una miniatura de la imagen (o 'Sin imagen') en la vista previa."""
+        vista = self._vistas[clave]
+        if not ruta:
+            vista.setPixmap(QPixmap())
+            vista.setText("Sin imagen")
+            return
+        pixmap = QPixmap(ruta)
+        if pixmap.isNull():
+            vista.setPixmap(QPixmap())
+            vista.setText(os.path.basename(ruta))
+            return
+        vista.setText("")
+        vista.setPixmap(pixmap.scaled(190, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def _elegir_imagen(self, clave):
+        ruta, _filtro = QFileDialog.getOpenFileName(
+            self, "Elegir imagen", "",
+            "Imágenes (*.png *.jpg *.jpeg *.gif *.bmp);;Todos los archivos (*.*)")
+        if not ruta:
+            return
+        try:
+            from PIL import Image
+            with Image.open(ruta) as img:
+                img.verify()
+        except Exception:
+            QMessageBox.warning(self, "Imagen no válida", "El archivo elegido no es una imagen válida (usá PNG o JPG).")
+            return
+        self._imagenes[clave] = ruta
+        self._mostrar_vista(clave, ruta)
+
+    def _quitar_imagen(self, clave):
+        self._imagenes[clave] = None
+        self._mostrar_vista(clave, None)
+
+    def _guardar(self):
+        def guardar_de_verdad():
+            try:
+                datos = {clave: campo.text().strip() for clave, campo in self.campos.items()}
+                database.save_inmobiliaria(datos)
+                for clave, ruta in self._imagenes.items():
+                    if ruta is None:
+                        database.quitar_imagen_inmobiliaria(clave)
+                    else:
+                        database.guardar_imagen_inmobiliaria(clave, ruta)
+                QMessageBox.information(self, "Configuración", "Los datos de la inmobiliaria se guardaron correctamente.")
+                self.accept()
+            except Exception as e:
+                manejar_error("No se pudo guardar la configuración", e, self)
+
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar la configuración de la inmobiliaria")
+
+
+# ===========================================================================
+# Ventanas: envío de recibos por mail (SMTP, plantilla, copia CC y direcciones)
+# ===========================================================================
+
+class DialogoConfiguracionSMTP(QDialog):
+    """Lo mínimo para poder mandar los recibos por mail: servidor, puerto, usuario y contraseña."""
+
+    def __init__(self, parent, on_guardado=None):
+        super().__init__(parent)
+        self.on_guardado = on_guardado
+        self.setWindowTitle("Configuración SMTP")
+        self.setModal(True)
+
+        datos = correo.get_smtp()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        grilla = QGridLayout()
+        grilla.setHorizontalSpacing(10)
+        grilla.setVerticalSpacing(6)
+        self.campos = {}
+        for fila, (clave, etiqueta, oculto) in enumerate((
+            ("servidor", "Servidor SMTP:", False),
+            ("puerto", "Puerto:", False),
+            ("usuario", "Usuario (mail):", False),
+            ("password", "Contraseña:", True),
+        )):
+            grilla.addWidget(QLabel(etiqueta), fila, 0)
+            campo = QLineEdit(datos.get(clave, ""))
+            if oculto:
+                campo.setEchoMode(QLineEdit.Password)
+            grilla.addWidget(campo, fila, 1)
+            self.campos[clave] = campo
+        layout.addLayout(grilla)
+
+        fila_tls = QHBoxLayout()
+        fila_tls.addWidget(QLabel("Seguridad de la conexión:"))
+        self.combo_tls = QComboBox()
+        self.combo_tls.addItems(["STARTTLS", "SSL", "Ninguna"])
+        self.combo_tls.setCurrentText(datos.get("tls") or "STARTTLS")
+        _estilizar_combo(self.combo_tls)
+        fila_tls.addWidget(self.combo_tls)
+        layout.addLayout(fila_tls)
+
+        self.lbl_estado = QLabel("")
+        self.lbl_estado.setWordWrap(True)
+        layout.addWidget(self.lbl_estado)
+
+        botones = QHBoxLayout()
+        boton_probar = QPushButton("Probar conexión")
+        boton_probar.clicked.connect(self._probar)
+        boton_guardar = QPushButton("Guardar")
+        boton_guardar.setObjectName("botonAcento")
+        boton_guardar.clicked.connect(self._guardar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_probar)
+        botones.addWidget(boton_guardar)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _leer(self):
+        datos = {clave: campo.text().strip() for clave, campo in self.campos.items()}
+        datos["tls"] = self.combo_tls.currentText()
+        return datos
+
+    def _probar(self):
+        datos = self._leer()
+        if not datos["puerto"].isdigit():
+            self.lbl_estado.setStyleSheet("color: #f87171; font-size: 11px; background: transparent;")
+            self.lbl_estado.setText("El puerto tiene que ser un número.")
+            return
+        self.lbl_estado.setStyleSheet(f"color: {COLOR_TEXTO_SUAVE}; font-size: 11px; background: transparent;")
+        self.lbl_estado.setText("Probando...")
+        QApplication.processEvents()
+        ok, mensaje = correo.probar_conexion(datos)
+        color = "#4ade80" if ok else "#f87171"
+        self.lbl_estado.setStyleSheet(f"color: {color}; font-size: 11px; background: transparent;")
+        self.lbl_estado.setText(mensaje)
+
+    def _guardar(self):
+        def guardar_de_verdad():
+            try:
+                correo.guardar_smtp(self._leer())
+            except ValueError as e:
+                QMessageBox.warning(self, "Datos incompletos", str(e))
+                return
+            self.accept()
+            if self.on_guardado:
+                self.on_guardado()
+
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar la configuración SMTP")
+
+
+class DialogoPlantillaMail(QDialog):
+    """Asunto y cuerpo del mail de un edificio. Vacío = usa el predeterminado."""
+
+    def __init__(self, parent, edificio, on_guardado=None):
+        super().__init__(parent)
+        self.edificio = edificio
+        self.on_guardado = on_guardado
+        self.setWindowTitle(f"Asunto y cuerpo del mail - {edificio}")
+        self.setModal(True)
+        self.resize(520, 420)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(6)
+
+        layout.addWidget(QLabel("Asunto:"))
+        self.campo_asunto = QLineEdit()
+        layout.addWidget(self.campo_asunto)
+
+        layout.addWidget(QLabel("Cuerpo:"))
+        self.texto_cuerpo = QPlainTextEdit()
+        layout.addWidget(self.texto_cuerpo, 1)
+
+        nota = QLabel(
+            "Variables disponibles: {edificio}, {unidad}, {expensas_de}, {gastos_de}.\n"
+            "«unidad» es lo que se pagó (ej. «1 A y Cochera 6»); los períodos van abreviados, "
+            "igual que en el recibo.")
+        nota.setStyleSheet(f"color: {COLOR_TEXTO_SUAVE}; font-size: 10px; background: transparent;")
+        nota.setWordWrap(True)
+        layout.addWidget(nota)
+
+        self.lbl_estado = QLabel("")
+        self.lbl_estado.setObjectName("error")
+        self.lbl_estado.setWordWrap(True)
+        layout.addWidget(self.lbl_estado)
+
+        botones = QHBoxLayout()
+        boton_restablecer = QPushButton("Restablecer predeterminado")
+        boton_restablecer.clicked.connect(self._restablecer)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        boton_guardar = QPushButton("Guardar")
+        boton_guardar.setObjectName("botonAcento")
+        boton_guardar.clicked.connect(self._guardar)
+        botones.addWidget(boton_restablecer)
+        botones.addStretch()
+        botones.addWidget(boton_cancelar)
+        botones.addWidget(boton_guardar)
+        layout.addLayout(botones)
+
+        self._cargar()
+
+    def _cargar(self):
+        asunto, cuerpo = correo.get_plantilla(self.edificio)
+        self.campo_asunto.setText(asunto)
+        self.texto_cuerpo.setPlainText(cuerpo)
+
+    def _restablecer(self):
+        self.campo_asunto.setText(correo.ASUNTO_DEFECTO)
+        self.texto_cuerpo.setPlainText(correo.CUERPO_DEFECTO)
+
+    def _guardar(self):
+        asunto = self.campo_asunto.text().strip()
+        cuerpo = self.texto_cuerpo.toPlainText().strip()
+
+        def guardar_de_verdad():
+            try:
+                correo.set_plantilla(self.edificio, asunto, cuerpo)
+            except ValueError as e:
+                self.lbl_estado.setText(str(e))
+                return
+            self.accept()
+            if self.on_guardado:
+                self.on_guardado()
+
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar la plantilla del mail")
+
+
+class DialogoCopiaMail(QDialog):
+    """Un mail de copia (CC) para cada envío, que se puede activar o desactivar sin borrarlo."""
+
+    def __init__(self, parent, on_guardado=None):
+        super().__init__(parent)
+        self.on_guardado = on_guardado
+        self.setWindowTitle("Copia (CC)")
+        self.setModal(True)
+
+        datos = correo.get_copia()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        fila = QHBoxLayout()
+        fila.addWidget(QLabel("Mail de copia:"))
+        self.campo_email = QLineEdit(datos["email"])
+        fila.addWidget(self.campo_email)
+        layout.addLayout(fila)
+
+        self.check_activa = QCheckBox("Mandar copia a este mail en cada envío")
+        self.check_activa.setChecked(bool(datos["activa"]))
+        layout.addWidget(self.check_activa)
+
+        self.lbl_estado = QLabel("")
+        self.lbl_estado.setObjectName("error")
+        self.lbl_estado.setWordWrap(True)
+        layout.addWidget(self.lbl_estado)
+
+        botones = QHBoxLayout()
+        boton_guardar = QPushButton("Guardar")
+        boton_guardar.setObjectName("botonAcento")
+        boton_guardar.clicked.connect(self._guardar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_guardar)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+    def _guardar(self):
+        email, activa = self.campo_email.text().strip(), self.check_activa.isChecked()
+
+        def guardar_de_verdad():
+            try:
+                correo.guardar_copia(email, activa)
+            except ValueError as e:
+                self.lbl_estado.setText(str(e))
+                return
+            self.accept()
+            if self.on_guardado:
+                self.on_guardado()
+
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar la copia (CC) del mail")
+
+
+class VentanaMails(QDialog):
+    """Direcciones de mail (inquilino y dueño) de cada unidad de un edificio, para enviar recibos."""
+
+    def __init__(self, parent, edificio_inicial=""):
+        super().__init__(parent)
+        self.setWindowTitle("Mailing")
+        self.setModal(True)
+        self.resize(980, 560)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        top.addWidget(QLabel("Edificio:"))
+        self.combo_edificio = QComboBox()
+        self.combo_edificio.addItems(database.get_nombres_edificios())
+        self.combo_edificio.setCurrentText(edificio_inicial)
+        self.combo_edificio.setMinimumWidth(220)
+        _estilizar_combo(self.combo_edificio)
+        self.combo_edificio.currentIndexChanged.connect(self._cargar)
+        top.addWidget(self.combo_edificio)
+        top.addStretch()
+        boton_plantilla = QPushButton("Asunto y cuerpo del mail")
+        boton_plantilla.clicked.connect(self._editar_plantilla)
+        boton_copia = QPushButton("Copia (CC)")
+        boton_copia.clicked.connect(self._editar_copia)
+        boton_smtp = QPushButton("Configuración SMTP")
+        boton_smtp.clicked.connect(self._config_smtp)
+        top.addWidget(boton_plantilla)
+        top.addWidget(boton_copia)
+        top.addWidget(boton_smtp)
+        layout.addLayout(top)
+
+        nota = QLabel(
+            "Al enviar un recibo se manda a todos los inquilinos y dueños que estén cargados.\n"
+            "Un depto que paga junto con su cochera/baulera usa los mails del depto.")
+        nota.setStyleSheet(f"color: {COLOR_TEXTO_SUAVE}; font-size: 10px; background: transparent;")
+        layout.addWidget(nota)
+
+        self.tabla = QTableWidget(0, 5)
+        self.tabla.setObjectName("listaSimple")
+        self.tabla.setHorizontalHeaderLabels(["Unidad", "Inquilino 1", "Inquilino 2", "Dueño 1", "Dueño 2"])
+        self.tabla.verticalHeader().setVisible(False)
+        self.tabla.setShowGrid(False)
+        self.tabla.setSelectionMode(QAbstractItemView.NoSelection)
+        self.tabla.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        for col in range(1, 5):
+            self.tabla.horizontalHeader().setSectionResizeMode(col, QHeaderView.Stretch)
+        layout.addWidget(self.tabla, 1)
+
+        botones = QHBoxLayout()
+        boton_guardar = QPushButton("Guardar")
+        boton_guardar.setObjectName("botonAcento")
+        boton_guardar.clicked.connect(self._guardar)
+        boton_cancelar = QPushButton("Cancelar")
+        boton_cancelar.clicked.connect(self.reject)
+        botones.addWidget(boton_guardar)
+        botones.addWidget(boton_cancelar)
+        botones.addStretch()
+        layout.addLayout(botones)
+
+        self._campos_por_unidad = {}
+        self._cargar()
+
+    def _config_smtp(self):
+        DialogoConfiguracionSMTP(self).show()
+
+    def _editar_copia(self):
+        DialogoCopiaMail(self).show()
+
+    def _editar_plantilla(self):
+        edificio = self.combo_edificio.currentText()
+        if not edificio:
+            QMessageBox.warning(self, "Atención", "Elegí primero un edificio.")
+            return
+        DialogoPlantillaMail(self, edificio).show()
+
+    def _cargar(self):
+        self.tabla.setRowCount(0)
+        self._campos_por_unidad = {}
+
+        edificio = self.combo_edificio.currentText()
+        if not edificio:
+            return
+        todas = database.get_unidades_por_edificio(edificio)
+        por_id = indice_por_id(todas)
+        guardados = correo.get_emails_unidades()
+
+        filas = [(u, n) for u, n in ordenar_con_asociadas(todas) if not (n == 1 and incluida_en_total(u))]
+        self.tabla.setRowCount(len(filas))
+        for fila, (u, nivel) in enumerate(filas):
+            texto = ("      " if nivel else "") + f"{nombre_tipo(normalizar_tipo(u['tipo']))} — {etiqueta_unidad(u, por_id)}"
+            item = QTableWidgetItem(texto)
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            self.tabla.setItem(fila, 0, item)
+            existentes = guardados.get(u["id"], {})
+            variables = {}
+            for col, campo in enumerate(correo.EMAILS_CAMPOS[1:], start=1):
+                entrada = QLineEdit(existentes.get(campo, ""))
+                self.tabla.setCellWidget(fila, col, entrada)
+                variables[campo] = entrada
+            self._campos_por_unidad[u["id"]] = variables
+        if not todas:
+            self.tabla.setRowCount(1)
+            self.tabla.setItem(0, 0, QTableWidgetItem("Este edificio todavía no tiene unidades."))
+
+    def _guardar(self):
+        invalidas = []
+        datos_por_unidad = {}
+        for unidad_id, variables in self._campos_por_unidad.items():
+            valores = {campo: entrada.text().strip() for campo, entrada in variables.items()}
+            for valor in valores.values():
+                if valor and not correo.es_email_valido(valor):
+                    invalidas.append(valor)
+            datos_por_unidad[unidad_id] = valores
+        if invalidas:
+            QMessageBox.warning(
+                self, "Mails inválidos",
+                "Estos mails no tienen un formato válido:\n\n" + "\n".join(invalidas[:10]))
+            return
+
+        def guardar_de_verdad():
+            correo.set_emails_unidades(datos_por_unidad)
+            QMessageBox.information(self, "Mails", "Las direcciones se guardaron correctamente.")
+            self.accept()
+
+        requerir_maestro(self, guardar_de_verdad, motivo="guardar las direcciones de mail")
+
+
+# ===========================================================================
+# Ventana: historial de mails enviados
+# ===========================================================================
+
+COLUMNAS_ENVIOS = ("fecha", "edificio", "numero_recibo", "unidad", "destinatario", "resultado", "detalle")
+TITULOS_ENVIOS = {"fecha": "Fecha", "edificio": "Edificio", "numero_recibo": "N°", "unidad": "Unidad",
+                  "destinatario": "Destinatario", "resultado": "Resultado", "detalle": "Detalle"}
+ANCHOS_ENVIOS = {"fecha": 110, "edificio": 140, "numero_recibo": 55, "unidad": 140,
+                 "destinatario": 180, "resultado": 80, "detalle": 220}
+
+
+class VentanaRegistroEnvios(QDialog):
+    """Lista de mails enviados, con filtro por edificio y reenvío a una dirección puntual."""
+
+    def __init__(self, parent, edificio_inicial=""):
+        super().__init__(parent)
+        self.setWindowTitle("Historial de mails")
+        self.setModal(True)
+        self.resize(1160, 500)
+
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        layout_externo.setSpacing(0)
+
+        cuerpo = QHBoxLayout()
+        cuerpo.setContentsMargins(0, 0, 0, 0)
+        cuerpo.setSpacing(0)
+        layout_externo.addLayout(cuerpo, 1)
+
+        self._nombres_sidebar = ["(Todos)"] + database.get_nombres_edificios()
+        self.lista_edificios = _crear_sidebar_edificios(cuerpo, self._nombres_sidebar, self._recargar)
+
+        contenedor = QWidget()
+        layout = QVBoxLayout(contenedor)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+        cuerpo.addWidget(contenedor, 1)
+
+        self.tabla = QTableWidget(0, len(COLUMNAS_ENVIOS))
+        self.tabla.setObjectName("listaSimple")
+        self.tabla.setHorizontalHeaderLabels([TITULOS_ENVIOS[c] for c in COLUMNAS_ENVIOS])
+        self.tabla.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tabla.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tabla.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tabla.setShowGrid(False)
+        self.tabla.setAlternatingRowColors(True)
+        self.tabla.verticalHeader().setVisible(False)
+        self.tabla.verticalHeader().setDefaultSectionSize(28)
+        self.tabla.horizontalHeader().setFixedHeight(32)
+        for col, clave in enumerate(COLUMNAS_ENVIOS):
+            self.tabla.setColumnWidth(col, ANCHOS_ENVIOS[clave])
+        self.tabla.horizontalHeader().setSectionResizeMode(COLUMNAS_ENVIOS.index("detalle"), QHeaderView.Stretch)
+        layout.addWidget(self.tabla, 1)
+
+        pie = QHBoxLayout()
+        boton_reenviar = QPushButton("Reenviar")
+        boton_reenviar.setStyleSheet("background-color: #16a34a; color: white; border: none;")
+        boton_reenviar.clicked.connect(self._reenviar)
+        boton_cerrar = QPushButton("Cerrar")
+        boton_cerrar.clicked.connect(self.reject)
+        pie.addWidget(boton_reenviar)
+        pie.addStretch()
+        pie.addWidget(boton_cerrar)
+        layout.addLayout(pie)
+
+        self._filas_por_fila = {}
+        self.lista_edificios.blockSignals(True)
+        self.lista_edificios.setCurrentRow(0)   # siempre arranca en "(Todos)"
+        self.lista_edificios.blockSignals(False)
+        self._recargar()
+
+    def _filtro_actual(self):
+        item = self.lista_edificios.currentItem()
+        return item.text() if item else "(Todos)"
+
+    def _recargar(self):
+        self.tabla.setRowCount(0)
+        self._filas_por_fila = {}
+        filtro = self._filtro_actual()
+        registro = correo.get_mails_enviados(None if filtro in ("", "(Todos)") else filtro)
+        self.tabla.setRowCount(len(registro))
+        for fila, r in enumerate(registro):
+            valores = (r.get("fecha", ""), r.get("edificio", ""), r.get("numero_recibo", ""), r.get("unidad", ""),
+                       r.get("destinatario", ""), r.get("resultado", ""), r.get("detalle", ""))
+            es_error = r.get("resultado") != "OK"
+            for col, valor in enumerate(valores):
+                item = QTableWidgetItem(valor)
+                if col in (2, 5):
+                    item.setTextAlignment(Qt.AlignCenter)
+                if es_error:
+                    item.setForeground(QColor("#f87171"))
+                self.tabla.setItem(fila, col, item)
+            self._filas_por_fila[fila] = r
+
+    def _reenviar(self):
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            QMessageBox.information(self, "Reenviar", "Seleccioná primero un envío de la lista.")
+            return
+        r = self._filas_por_fila[filas[0].row()]
+        fila_historial = next(
+            (h for h in database.get_historial()
+             if h.get("edificio") == r.get("edificio") and h.get("numero_recibo") == r.get("numero_recibo")), None)
+        if fila_historial is None:
+            QMessageBox.warning(
+                self, "Reenviar", "No encuentro el recibo de este envío en el historial (¿se borró el edificio?).")
+            return
+        confirmado = QMessageBox.question(
+            self, "Reenviar", f"¿Reenviar el recibo N° {r['numero_recibo']} a {r['destinatario']}?")
+        if confirmado != QMessageBox.Yes:
+            return
+        ok, detalle = correo.reenviar(fila_historial, r["destinatario"], cc=correo.obtener_cc())
+        if ok:
+            QMessageBox.information(self, "Reenviar", "Reenviado correctamente.")
+        else:
+            QMessageBox.warning(self, "Reenviar", f"No se pudo reenviar: {detalle}")
+        self._recargar()
+
+
+# ===========================================================================
+# Ventana: historial de recibos
+# ===========================================================================
+
+# Estado de pago según "Gastos de" (el historial no guarda el estado, pero el texto lo dice)
+_ESTADO_POR_GASTOS = {"A CTA.": "A cta.", "DEUDA": "Deuda", "NO PAGADO": "No pagado"}
+
+
+def tiene_datos_completos(r):
+    """True si el renglón del historial guardó todos los datos del PDF (recibos emitidos desde esta versión)."""
+    return r.get("datos_completos") == "1"
+
+
+def _datos_pdf_guardados(r):
+    """Arma los datos del PDF solo con las columnas del historial: no depende de la unidad, el edificio
+    ni la inmobiliaria actuales, así que sale igual aunque después cambien o se borren."""
+    principal = {"tipo": r["tipo"], "piso": r["piso"], "unidad": r["unidad"].split(" + ")[0].strip(),
+                 "uf": r["uf"], "dueno": r["dueno"], "inquilino": r["inquilino"]}
+    agrupadas = []
+    for item in (r["asociadas"] or "").split(";"):
+        if item.strip():
+            tipo, piso, numero = (p.strip() for p in item.split("|"))
+            agrupadas.append({"tipo": tipo, "piso": piso, "unidad": numero})
+    datos_edificio = {"direccion": r["edificio_direccion"], "localidad": r["edificio_localidad"],
+                      "cuit": r["edificio_cuit"], "admin_nombre": r["admin_nombre"],
+                      "admin_cuit": r["admin_cuit"], "admin_rpac": r["admin_rpac"]}
+    inmobiliaria = {"nombre": r["inmo_nombre"], "subtitulo": r["inmo_subtitulo"], "direccion": r["inmo_direccion"],
+                    "telefono": r["inmo_telefono"], "email": r["inmo_email"]}
+    return armar_datos_recibo(
+        numero=int(r["numero_recibo"]),
+        fecha=datetime.strptime(r["fecha"], "%d/%m/%Y").date(),
+        edificio=r["edificio"], datos_edificio=datos_edificio,
+        unidad=principal, agrupadas=agrupadas,
+        expensas_de=r["expensas_de"], gastos_de=r["gastos_de"],
+        estado=r["estado"] or None, importe=float(r["importe"]), inmobiliaria=inmobiliaria,
+    )
+
+
+def datos_pdf_desde_historial(r):
+    """
+    Devuelve los mismos datos con que se armó el PDF. Si el renglón guardó sus datos completos, salen
+    exactos de sus columnas. Si es un recibo anterior, se reconstruye: lo que guarda el historial sale
+    tal cual y el resto (dueño, UF, CUIT y direcciones del edificio, inmobiliaria) sale de los datos
+    actuales. Lanza ValueError si en la reconstrucción la unidad ya no existe con ese nombre.
+    """
+    if tiene_datos_completos(r):
+        return _datos_pdf_guardados(r)
+    return _reconstruir_datos_pdf(r)
+
+
+def _reconstruir_datos_pdf(r):
+    edificio = r["edificio"]
+    todas = database.get_unidades_por_edificio(edificio)
+    por_id = indice_por_id(todas)
+    partes = [p.strip() for p in (r.get("unidad") or "").split(" + ") if p.strip()]
+    if not partes:
+        raise ValueError("El registro del historial no tiene unidad.")
+
+    principal = por_id.get(r.get("unidad_id") or "")
+    if principal is None:   # registros anteriores a unidad_id: se busca por piso, tipo y letra
+        tipo = normalizar_tipo(r.get("tipo"))
+        principal = next((u for u in todas if normalizar_tipo(u["tipo"]) == tipo
+                          and (u.get("piso") or "").strip() == (r.get("piso") or "").strip()
+                          and (u.get("unidad") or "").strip() == partes[0]), None)
+    if principal is None:
+        raise ValueError(f"No encuentro la unidad «{partes[0]}» en {edificio} (¿se borró o se renombró?).")
+    principal = dict(principal, inquilino=r.get("inquilino", ""))   # el inquilino de cuando se emitió
+
+    agrupadas = []
+    for etiqueta in partes[1:]:   # mismo texto que se guardó al emitir (sin por_id)
+        h = next((u for u in todas if etiqueta_unidad(u) == etiqueta), None)
+        if h is None:
+            raise ValueError(f"No encuentro «{etiqueta}» en {edificio} (¿se borró o se renombró?).")
+        agrupadas.append(h)
+
+    gastos_de = r.get("gastos_de", "")
+    return armar_datos_recibo(
+        numero=int(r["numero_recibo"]),
+        fecha=datetime.strptime(r["fecha"], "%d/%m/%Y").date(),
+        edificio=edificio,
+        datos_edificio=database.get_edificio(edificio) or {},
+        unidad=principal, agrupadas=agrupadas,
+        expensas_de=r.get("expensas_de", ""), gastos_de=gastos_de,
+        estado=_ESTADO_POR_GASTOS.get(gastos_de.strip().upper(), "Total"),
+        importe=float(r.get("importe") or 0),
+        inmobiliaria=database.get_inmobiliaria(),
+    )
+
+
+class _AbreRecibosMixin:
+    """Abrir el PDF de la fila seleccionada (self.tabla / self._archivo_por_fila) o mostrarlo en su carpeta."""
+
+    def _fila_seleccionada(self):
+        filas = self.tabla.selectionModel().selectedRows()
+        return filas[0].row() if filas else None
+
+    def _ruta_absoluta_seleccionada(self):
+        fila = self._fila_seleccionada()
+        if fila is None:
+            QMessageBox.information(self, "Recibos", "Seleccioná primero un recibo de la lista.")
+            return None
+        archivo_rel = self._archivo_por_fila.get(fila, "")
+        if not archivo_rel:
+            QMessageBox.warning(self, "Recibos", "Este registro no tiene un archivo asociado.")
+            return None
+        return os.path.join(config.BASE_DIR, archivo_rel)
+
+    def _abrir_pdf_seleccionado(self):
+        ruta = self._ruta_absoluta_seleccionada()
+        if not ruta:
+            return
+        ok, mensaje_error = abrir_pdf(ruta)
+        if not ok:
+            QMessageBox.warning(self, "No se pudo abrir el PDF", mensaje_error)
+
+    def _mostrar_en_carpeta(self):
+        ruta = self._ruta_absoluta_seleccionada()
+        if not ruta:
+            return
+        if not revelar_en_explorador(ruta):
+            QMessageBox.information(self, "Ubicación del archivo", ruta)
+
+    def _regenerar_pdf(self):
+        """Vuelve a armar el PDF de un recibo ya emitido, con su mismo número, a partir del historial."""
+        fila = self._fila_seleccionada()
+        if fila is None:
+            QMessageBox.information(self, "Regenerar PDF", "Seleccioná primero un recibo de la lista.")
+            return
+        registro = self._filas_por_fila.get(fila)
+        if not registro or not registro.get("archivo"):
+            QMessageBox.warning(self, "Regenerar PDF", "Este registro no tiene un archivo asociado.")
+            return
+
+        ruta = os.path.join(config.BASE_DIR, registro["archivo"])
+        if os.path.isfile(ruta):
+            confirmado = QMessageBox.question(
+                self, "Regenerar PDF",
+                "Este PDF todavía existe.\n\n¿Reemplazarlo por uno nuevo armado con los mismos datos?")
+            if confirmado != QMessageBox.Yes:
+                return
+        if not tiene_datos_completos(registro):
+            confirmado = QMessageBox.question(
+                self, "Regenerar PDF",
+                "Este recibo es de antes de guardar todos sus datos. Se va a armar con los datos ACTUALES "
+                "de la unidad y del edificio: si cambiaron el dueño, la UF o los datos del consorcio, "
+                "el PDF va a salir distinto.\n\n¿Seguir?")
+            if confirmado != QMessageBox.Yes:
+                return
+
+        try:
+            datos = datos_pdf_desde_historial(registro)
+            os.makedirs(os.path.dirname(ruta), exist_ok=True)
+            generar_pdf_recibo(datos, ruta)
+        except ValueError as e:
+            QMessageBox.warning(self, "No se pudo regenerar el PDF", str(e))
+            return
+        except Exception as e:
+            manejar_error("No se pudo regenerar el PDF", e, self)
+            return
+        QMessageBox.information(
+            self, "Regenerar PDF", f"Recibo N° {registro['numero_recibo']} regenerado en:\n\n{ruta}")
+
+
+class _EnviarPorMailMixin:
+    """
+    Checkbox de selección (columna 'sel') + Seleccionar todas/Quitar todas + Enviar por mail,
+    para una tabla del historial. Necesita self.tabla, self._casillas_por_fila (fila -> QCheckBox)
+    y self._filas_por_fila (fila -> fila del historial, tal como la devuelve database.get_historial()).
+    """
+
+    def _seleccionar_todas_mail(self):
+        for casilla in self._casillas_por_fila.values():
+            casilla.setChecked(True)
+
+    def _quitar_todas_mail(self):
+        for casilla in self._casillas_por_fila.values():
+            casilla.setChecked(False)
+
+    def _enviar_por_mail(self):
+        elegidas = [fila for fila, casilla in self._casillas_por_fila.items() if casilla.isChecked()]
+        if not elegidas:
+            QMessageBox.information(self, "Enviar por mail", "Tildá primero los recibos que querés mandar.")
+            return
+        if not correo.existe_smtp():
+            QMessageBox.warning(
+                self, "Enviar por mail",
+                "Todavía no cargaste la configuración SMTP (Administrar → Mailing → Configuración SMTP).")
+            return
+
+        cc = correo.obtener_cc()
+        detalle, enviados, fallidos = [], 0, 0
+        for fila in elegidas:
+            registro = self._filas_por_fila[fila]
+            resultados = correo.enviar_recibo(registro, cc=cc)
+            etiqueta = f"{registro.get('piso', '')} {registro.get('unidad', '')}".strip()
+            for destinatario, ok, error in resultados:
+                if ok:
+                    enviados += 1
+                else:
+                    fallidos += 1
+                    detalle.append(f"{etiqueta} → {destinatario}: {error}")
+
+        mensaje = f"Se enviaron {enviados} mail(s)."
+        if fallidos:
+            mensaje += f"\n\n{fallidos} con error:\n" + "\n".join(detalle[:15])
+            if len(detalle) > 15:
+                mensaje += f"\n… y {len(detalle) - 15} más."
+            QMessageBox.warning(self, "Enviar por mail", mensaje)
+        else:
+            QMessageBox.information(self, "Enviar por mail", mensaje)
+
+
+COLUMNAS_HISTORIAL = ("sel", "numero_recibo", "edificio", "fecha", "expensas_de", "tipo", "piso",
+                      "unidad", "inquilino", "importe", "archivo")
+TITULOS_HISTORIAL = {
+    "sel": "ENVIAR", "numero_recibo": "N°", "edificio": "Edificio", "fecha": "Fecha", "expensas_de": "Expensas de",
+    "tipo": "Tipo", "piso": "Piso", "unidad": "Unidad", "inquilino": "Inquilino", "importe": "Importe",
+    "archivo": "Archivo",
+}
+ANCHOS_HISTORIAL = {
+    "sel": 65, "numero_recibo": 55, "edificio": 150, "fecha": 80, "expensas_de": 110,
+    "tipo": 80, "piso": 55, "unidad": 65, "inquilino": 150, "importe": 90, "archivo": 240,
+}
+
+
+class VentanaHistorial(_AbreRecibosMixin, _EnviarPorMailMixin, QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Historial de recibos generados")
+        self.setModal(True)
+        self.resize(1280, 560)
+
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        layout_externo.setSpacing(0)
+
+        cuerpo = QHBoxLayout()
+        cuerpo.setContentsMargins(0, 0, 0, 0)
+        cuerpo.setSpacing(0)
+        layout_externo.addLayout(cuerpo, 1)
+
+        self.lista_edificios = _crear_sidebar_edificios(
+            cuerpo, ["(Todos)"] + database.get_nombres_edificios(), self._recargar)
+
+        contenedor = QWidget()
+        layout = QVBoxLayout(contenedor)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+        cuerpo.addWidget(contenedor, 1)
+
+        self.tabla = QTableWidget(0, len(COLUMNAS_HISTORIAL))
+        self.tabla.setObjectName("listaSimple")
+        self.tabla.setHorizontalHeaderLabels([TITULOS_HISTORIAL[c] for c in COLUMNAS_HISTORIAL])
+        self.tabla.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tabla.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tabla.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tabla.setShowGrid(False)
+        self.tabla.setAlternatingRowColors(True)
+        self.tabla.verticalHeader().setVisible(False)
+        self.tabla.verticalHeader().setDefaultSectionSize(30)
+        self.tabla.horizontalHeader().setFixedHeight(32)
+        for col, clave in enumerate(COLUMNAS_HISTORIAL):
+            self.tabla.setColumnWidth(col, ANCHOS_HISTORIAL[clave])
+        self.tabla.horizontalHeader().setSectionResizeMode(COLUMNAS_HISTORIAL.index("archivo"), QHeaderView.Stretch)
+        self.tabla.doubleClicked.connect(lambda _i: self._abrir_pdf_seleccionado())
+        layout.addWidget(self.tabla, 1)
+
+        pie = QHBoxLayout()
+        boton_abrir = QPushButton("Abrir PDF")
+        boton_abrir.setObjectName("botonAcento")
+        boton_abrir.clicked.connect(self._abrir_pdf_seleccionado)
+        boton_carpeta = QPushButton("Mostrar en carpeta")
+        boton_carpeta.clicked.connect(self._mostrar_en_carpeta)
+        boton_todas = QPushButton("Seleccionar todas")
+        boton_todas.clicked.connect(self._seleccionar_todas_mail)
+        boton_ninguna = QPushButton("Quitar todas")
+        boton_ninguna.clicked.connect(self._quitar_todas_mail)
+        boton_enviar = QPushButton("Enviar por mail")
+        boton_enviar.setStyleSheet("background-color: #16a34a; color: white; border: none;")
+        boton_enviar.clicked.connect(self._enviar_por_mail)
+        boton_regenerar = QPushButton("Regenerar PDF")
+        boton_regenerar.clicked.connect(self._regenerar_pdf)
+        for b in (boton_abrir, boton_carpeta, boton_todas, boton_ninguna, boton_enviar, boton_regenerar):
+            pie.addWidget(b)
+        pie.addStretch()
+        layout.addLayout(pie)
+
+        self._archivo_por_fila = {}
+        self._filas_por_fila = {}
+        self._casillas_por_fila = {}
+        self.lista_edificios.blockSignals(True)
+        self.lista_edificios.setCurrentRow(0)
+        self.lista_edificios.blockSignals(False)
+        self._recargar()
+
+    def _filtro_actual(self):
+        item = self.lista_edificios.currentItem()
+        return item.text() if item else "(Todos)"
+
+    def _crear_casilla_mail(self):
+        contenedor = QWidget()
+        contenedor.setStyleSheet("background: transparent;")
+        lay = QHBoxLayout(contenedor)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addStretch()
+        casilla = QCheckBox()
+        casilla.setCursor(Qt.PointingHandCursor)
+        lay.addWidget(casilla)
+        lay.addStretch()
+        return contenedor, casilla
+
+    def _recargar(self):
+        self.tabla.setRowCount(0)
+        self._archivo_por_fila = {}
+        self._filas_por_fila = {}
+        self._casillas_por_fila = {}
+
+        filtro = self._filtro_actual()
+        historial = database.get_historial()
+        historial.sort(key=lambda r: r.get("numero_recibo", ""), reverse=True)
+        historial = [r for r in historial if filtro in ("", "(Todos)") or r.get("edificio") == filtro]
+
+        self.tabla.setRowCount(len(historial))
+        for fila, r in enumerate(historial):
+            importe_fmt = format_currency_ar(parse_importe(r.get("importe", "0")))
+            valores = {
+                "numero_recibo": r.get("numero_recibo", ""), "edificio": r.get("edificio", ""),
+                "fecha": r.get("fecha", ""), "expensas_de": r.get("expensas_de", ""), "tipo": r.get("tipo", ""),
+                "piso": r.get("piso", ""), "unidad": r.get("unidad", ""), "inquilino": r.get("inquilino", ""),
+                "importe": importe_fmt, "archivo": r.get("archivo", ""),
+            }
+            for col, clave in enumerate(COLUMNAS_HISTORIAL):
+                if clave == "sel":
+                    contenedor, casilla = self._crear_casilla_mail()
+                    self.tabla.setCellWidget(fila, col, contenedor)
+                    self._casillas_por_fila[fila] = casilla
+                else:
+                    item = QTableWidgetItem(valores[clave])
+                    centrado = clave in ("numero_recibo", "piso", "unidad", "importe")
+                    item.setTextAlignment(Qt.AlignCenter if centrado else Qt.AlignVCenter)
+                    self.tabla.setItem(fila, col, item)
+            self._archivo_por_fila[fila] = r.get("archivo", "")
+            self._filas_por_fila[fila] = r
+
+
+# ===========================================================================
+# Ventana: recibos recién generados
+# ===========================================================================
+
+COLUMNAS_GENERADOS = ("sel", "numero_recibo", "tipo", "unidad", "inquilino", "importe", "gastos_de", "archivo")
+TITULOS_GENERADOS = {"sel": "ENVIAR", "numero_recibo": "N°", "tipo": "Tipo", "unidad": "Unidad", "inquilino": "Inquilino",
+                     "importe": "Importe", "gastos_de": "Gastos de", "archivo": "Archivo"}
+ANCHOS_GENERADOS = {"sel": 65, "numero_recibo": 55, "tipo": 80, "unidad": 150, "inquilino": 130,
+                    "importe": 90, "gastos_de": 110, "archivo": 220}
+
+
+class VentanaRecibosGenerados(_AbreRecibosMixin, _EnviarPorMailMixin, QDialog):
+    """Lista de los PDF que se acaban de generar, para abrirlos o mandarlos por mail desde ahí."""
+
+    def __init__(self, parent, generados, total, errores=()):
+        """generados: lista de (registro_historial, etiqueta_unidad)."""
+        super().__init__(parent)
+        self.setWindowTitle("Recibos generados")
+        self.setModal(True)
+        self.resize(960, 480)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        titulo = QLabel(f"Se generaron {len(generados)} de {total} recibo(s).")
+        titulo.setStyleSheet(f"color: {COLOR_TEXTO}; font-weight: 700; background: transparent;")
+        layout.addWidget(titulo)
+
+        self.tabla = QTableWidget(0, len(COLUMNAS_GENERADOS))
+        self.tabla.setObjectName("listaSimple")
+        self.tabla.setHorizontalHeaderLabels([TITULOS_GENERADOS[c] for c in COLUMNAS_GENERADOS])
+        self.tabla.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tabla.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tabla.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tabla.setShowGrid(False)
+        self.tabla.setAlternatingRowColors(True)
+        self.tabla.verticalHeader().setVisible(False)
+        self.tabla.verticalHeader().setDefaultSectionSize(30)
+        self.tabla.horizontalHeader().setFixedHeight(32)
+        for col, clave in enumerate(COLUMNAS_GENERADOS):
+            self.tabla.setColumnWidth(col, ANCHOS_GENERADOS[clave])
+        self.tabla.horizontalHeader().setSectionResizeMode(COLUMNAS_GENERADOS.index("archivo"), QHeaderView.Stretch)
+        self.tabla.doubleClicked.connect(lambda _i: self._abrir_pdf_seleccionado())
+        layout.addWidget(self.tabla, 1)
+
+        self._archivo_por_fila = {}
+        self._filas_por_fila = {}
+        self._casillas_por_fila = {}
+        self.tabla.setRowCount(len(generados))
+        for fila, (r, etiqueta) in enumerate(generados):
+            valores = {
+                "numero_recibo": r["numero_recibo"], "tipo": r["tipo"], "unidad": etiqueta,
+                "inquilino": r["inquilino"], "importe": format_currency_ar(parse_importe(r["importe"])),
+                "gastos_de": r["gastos_de"], "archivo": r["archivo"],
+            }
+            for col, clave in enumerate(COLUMNAS_GENERADOS):
+                if clave == "sel":
+                    contenedor, casilla = self._crear_casilla_mail()
+                    self.tabla.setCellWidget(fila, col, contenedor)
+                    self._casillas_por_fila[fila] = casilla
+                else:
+                    item = QTableWidgetItem(valores[clave])
+                    centrado = clave in ("numero_recibo", "importe")
+                    item.setTextAlignment(Qt.AlignCenter if centrado else Qt.AlignVCenter)
+                    self.tabla.setItem(fila, col, item)
+            self._archivo_por_fila[fila] = r["archivo"]
+            self._filas_por_fila[fila] = r
+
+        if errores:
+            lbl_errores = QLabel("Unidades con error:\n" + "\n".join(errores))
+            lbl_errores.setStyleSheet("color: #f87171; font-size: 11px; background: transparent;")
+            lbl_errores.setWordWrap(True)
+            layout.addWidget(lbl_errores)
+
+        pie = QHBoxLayout()
+        boton_abrir = QPushButton("Abrir PDF")
+        boton_abrir.setObjectName("botonAcento")
+        boton_abrir.clicked.connect(self._abrir_pdf_seleccionado)
+        boton_carpeta = QPushButton("Mostrar en carpeta")
+        boton_carpeta.clicked.connect(self._mostrar_en_carpeta)
+        boton_todas = QPushButton("Seleccionar todas")
+        boton_todas.clicked.connect(self._seleccionar_todas_mail)
+        boton_ninguna = QPushButton("Quitar todas")
+        boton_ninguna.clicked.connect(self._quitar_todas_mail)
+        boton_enviar = QPushButton("Enviar por mail")
+        boton_enviar.setStyleSheet("background-color: #16a34a; color: white; border: none;")
+        boton_enviar.clicked.connect(self._enviar_por_mail)
+        boton_cerrar = QPushButton("Cerrar")
+        boton_cerrar.clicked.connect(self.reject)
+        for b in (boton_abrir, boton_carpeta, boton_todas, boton_ninguna, boton_enviar):
+            pie.addWidget(b)
+        pie.addStretch()
+        pie.addWidget(boton_cerrar)
+        layout.addLayout(pie)
+
+        if generados:
+            self.tabla.selectRow(0)
+
+    def _crear_casilla_mail(self):
+        contenedor = QWidget()
+        contenedor.setStyleSheet("background: transparent;")
+        lay = QHBoxLayout(contenedor)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addStretch()
+        casilla = QCheckBox()
+        casilla.setCursor(Qt.PointingHandCursor)
+        lay.addWidget(casilla)
+        lay.addStretch()
+        return contenedor, casilla
+
+
+# ===========================================================================
+# Ventana: ayuda para generar recibos
+# ===========================================================================
+
+class VentanaAyudaRecibos(QDialog):
+    """Guía de cómo usar el programa para generar los recibos y enviarlos por mail (día a día,
+    no incluye la parte de Administrar). Con ejemplos armados como se verían en pantalla: la
+    tabla de la pantalla principal y la planilla de pagos."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Ayuda - Recibo de expensas")
+        self.setModal(True)
+        self.resize(820, 680)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.NoFrame)
+        contenedor = QWidget()
+        self._cont = QVBoxLayout(contenedor)
+        self._cont.setContentsMargins(24, 20, 24, 20)
+        self._cont.setSpacing(2)
+        area.setWidget(contenedor)
+        layout.addWidget(area, 1)
+
+        self._armar_contenido()
+
+        pie = QHBoxLayout()
+        pie.setContentsMargins(20, 10, 20, 16)
+        pie.addStretch()
+        boton_cerrar = QPushButton("Cerrar")
+        boton_cerrar.clicked.connect(self.reject)
+        pie.addWidget(boton_cerrar)
+        layout.addLayout(pie)
+
+    # -----------------------------------------------------------------
+    # Helpers de texto
+    # -----------------------------------------------------------------
+
+    def _titulo(self, texto):
+        lbl = QLabel(texto)
+        lbl.setStyleSheet(f"color: {COLOR_ACENTO}; font-size: 18px; font-weight: 700; background: transparent;")
+        self._cont.addWidget(lbl)
+        self._cont.addSpacing(6)
+
+    def _seccion(self, texto):
+        lbl = QLabel(texto)
+        lbl.setStyleSheet(f"color: {COLOR_ACENTO}; font-size: 13px; font-weight: 700; background: transparent;")
+        self._cont.addSpacing(12)
+        self._cont.addWidget(lbl)
+
+    def _parrafo(self, texto):
+        lbl = QLabel(texto)
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet(f"color: {COLOR_TEXTO}; font-size: 12px; background: transparent;")
+        self._cont.addWidget(lbl)
+
+    # -----------------------------------------------------------------
+    # Ejemplos armados con widgets reales (no solo texto)
+    # -----------------------------------------------------------------
+
+    def _ejemplo_pantalla(self):
+        """Una fila como la de la pantalla principal, con datos de ejemplo."""
+        tabla = QTableWidget(1, len(COLUMNAS))
+        tabla.setObjectName("listaSimple")
+        tabla.setHorizontalHeaderLabels([TITULOS[c] for c in COLUMNAS])
+        tabla.setSelectionMode(QAbstractItemView.NoSelection)
+        tabla.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        tabla.setFocusPolicy(Qt.NoFocus)
+        tabla.verticalHeader().setVisible(False)
+        tabla.verticalHeader().setDefaultSectionSize(34)
+        tabla.horizontalHeader().setFixedHeight(28)
+        tabla.setFixedHeight(28 + 34 + 4)
+        for col, clave in enumerate(COLUMNAS):
+            tabla.setColumnWidth(col, ANCHOS[clave])
+
+        valores = {
+            "tipo": "DEPTO", "piso": "1°", "unidad": "A", "uf": "12", "depto": "con Cochera 6",
+            "dueno": "Pedro Gómez", "inquilino": "María Ruiz", "importe": format_currency_ar(45000),
+        }
+        for col, clave in enumerate(COLUMNAS):
+            if clave == "sel":
+                _contenedor, casilla = App._crear_casilla_demo()
+                casilla.setChecked(True)
+                tabla.setCellWidget(0, col, _contenedor)
+            elif clave == "emitido":
+                bg, fg = CHIP_EMITIDO
+                tabla.setCellWidget(0, col, App._crear_chip("Emitido", bg, fg))
+            elif clave == "estado":
+                bg, fg = CHIP_ESTADO["total"]
+                tabla.setCellWidget(0, col, App._crear_chip("Total", bg, fg))
+            else:
+                item = QTableWidgetItem(valores.get(clave, ""))
+                item.setTextAlignment(Qt.AlignCenter if clave not in ("dueno", "inquilino") else Qt.AlignVCenter)
+                tabla.setItem(0, col, item)
+        self._cont.addWidget(tabla)
+        self._cont.addSpacing(10)
+
+    def _tabla_leyenda(self, filas):
+        """Tabla de dos columnas: nombre de columna -> qué significa."""
+        marco = QGridLayout()
+        marco.setHorizontalSpacing(0)
+        marco.setVerticalSpacing(0)
+        for fila, (nombre, explicacion) in enumerate(filas):
+            lbl_nombre = QLabel(nombre)
+            lbl_nombre.setWordWrap(True)
+            lbl_nombre.setStyleSheet(
+                f"background-color: {COLOR_TARJETA_ALT}; color: {COLOR_ACENTO}; font-weight: 700; "
+                f"border: 1px solid {COLOR_BORDE}; padding: 6px 8px;")
+            lbl_explicacion = QLabel(explicacion)
+            lbl_explicacion.setWordWrap(True)
+            lbl_explicacion.setStyleSheet(
+                f"background-color: {COLOR_TARJETA_ALT}; color: {COLOR_TEXTO}; "
+                f"border: 1px solid {COLOR_BORDE}; padding: 6px 8px;")
+            marco.addWidget(lbl_nombre, fila, 0)
+            marco.addWidget(lbl_explicacion, fila, 1)
+        marco.setColumnStretch(0, 0)
+        marco.setColumnStretch(1, 1)
+        marco.setColumnMinimumWidth(0, 150)
+        self._cont.addLayout(marco)
+        self._cont.addSpacing(12)
+
+    def _ejemplo_planilla(self):
+        """La planilla de pagos de un edificio, con una fila de ejemplo por cada estado posible."""
+        encabezados = ("Unidad", "Total a pagar", "Monto deuda", "Monto pagado", "Tipo pago")
+        filas = [
+            ("1° A", "45.000", "0", "45.000", "total"),
+            ("1° B", "40.000", "5.000", "30.000", "a cta"),
+            ("PB A", "38.000", "38.000", "38.000", "deuda"),
+            ("2° A", "42.000", "0", "0", "no pagado"),
+        ]
+        marco = QGridLayout()
+        marco.setSpacing(0)
+        for c, texto in enumerate(encabezados):
+            lbl = QLabel(texto)
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setStyleSheet(
+                f"background-color: {COLOR_ACENTO}; color: white; font-weight: 700; "
+                f"border: 1px solid {COLOR_BORDE}; padding: 6px 10px;")
+            marco.addWidget(lbl, 0, c)
+        for f, (unidad, total, deuda, pagado, tipo) in enumerate(filas, start=1):
+            _bg, fg = CHIP_ESTADO.get(tipo, CHIP_ESTADO_DEFECTO)
+            valores = (unidad, f"$ {total}", f"$ {deuda}", f"$ {pagado}", tipo.upper())
+            for c, valor in enumerate(valores):
+                lbl = QLabel(valor)
+                lbl.setAlignment(Qt.AlignCenter)
+                lbl.setStyleSheet(
+                    f"background-color: {COLOR_TARJETA_ALT}; color: {fg if c == 4 else COLOR_TEXTO}; "
+                    f"border: 1px solid {COLOR_BORDE}; padding: 6px 10px;")
+                marco.addWidget(lbl, f, c)
+        for c in range(5):
+            marco.setColumnStretch(c, 1)
+        self._cont.addLayout(marco)
+        self._cont.addSpacing(6)
+
+    # -----------------------------------------------------------------
+    # Contenido
+    # -----------------------------------------------------------------
+
+    def _armar_contenido(self):
+        self._titulo("Recibo de expensas: guía rápida")
+        self._parrafo("Estos son los pasos para generar los recibos en PDF de un edificio ya "
+                      "cargado, y mandarlos por mail.")
+
+        self._seccion("1. Elegir el edificio")
+        self._parrafo("La lista «Edificios», a la izquierda de la pantalla principal, lista los "
+                      "edificios ya cargados. Al elegir uno, la tabla de al lado se llena sola "
+                      "con todas sus unidades.")
+
+        self._seccion("2. La pantalla principal: un ejemplo")
+        self._parrafo("Cada fila es una unidad. Esta es una fila de ejemplo: un departamento "
+                      "1° A que ya emitió su recibo, con su cochera incluida en el mismo importe.")
+        self._ejemplo_pantalla()
+        self._tabla_leyenda([
+            ("EMITIDO", "El chip de la izquierda de todo: verde si el recibo de esa unidad ya se "
+                        "generó para el período actual, rojo si todavía no."),
+            ("TIPO / PISO /\nLETRA-N° / UF", "Identifican la unidad."),
+            ("RELACIÓN", "En una cochera o baulera de un depto, de qué depto es (de 1° A). En un "
+                         "depto que incluye alguna en su recibo, cuáles (con Cochera 6)."),
+            ("DUEÑO / INQUILINO /\nIMPORTE", "Datos de la unidad y monto del recibo."),
+            ("PAGO", "El estado según la planilla de pagos: Total, A cta., Deuda, No pagado, o Sin "
+                     "celda si esa unidad todavía no tiene asignada una celda en la planilla."),
+            ("EMITIR", "La casilla, al final de todo: para tildar qué unidades generar."),
+        ])
+
+        self._seccion("3. La planilla de pagos: un ejemplo")
+        self._parrafo("Cada edificio tiene su propia planilla en Excel («Abrir planilla de "
+                      "pagos»). Se completan, por unidad, Total a pagar, Monto deuda y Monto "
+                      "pagado; el Tipo pago sale solo, según cuánto se pagó:")
+        self._ejemplo_planilla()
+        self._parrafo("Total: lo pagado cubre el total más la deuda. A cta.: pagó una parte. "
+                      "Deuda: pagó justo la deuda que traía (nada del mes actual). No pagado: "
+                      "no pagó nada. Después de completar la planilla hay que guardarla "
+                      "(Ctrl+G) y cerrarla, para que el programa pueda leerla.")
+
+        self._seccion("4. Generar los recibos")
+        self._parrafo("Con el edificio elegido y la planilla ya cargada:\n"
+                      "• Tildar las unidades en la columna EMITIR (o «Seleccionar todas»).\n"
+                      "• «Actualizar montos desde planilla», para traer lo que se cargó en el Excel.\n"
+                      "• «Generar recibos PDF». Se genera un PDF por cada unidad tildada.")
+
+        self._seccion("5. Ver y abrir los recibos generados")
+        self._parrafo("Al terminar se abre una lista con los recibos recién hechos: «Abrir "
+                      "PDF» (o doble clic) y «Mostrar en carpeta». Cualquier recibo generado "
+                      "antes, de otro día, está en Ver → Historial de recibos.")
+
+        self._seccion("6. Enviar los recibos por mail")
+        self._parrafo("Tanto en esa lista como en el Historial, cada fila tiene una casilla en "
+                      "la columna ENVIAR.\n"
+                      "• Tildar los recibos a enviar (o «Seleccionar todas» / «Quitar todas»).\n"
+                      "• «Enviar por mail»: manda cada recibo, en PDF, a las direcciones "
+                      "cargadas para esa unidad. Al terminar muestra cuántos se enviaron y el "
+                      "detalle de los que fallaron.")
+
+
+# ===========================================================================
+# Ventana: cargar desde backup
+# ===========================================================================
+
+class VentanaCargarBackup(QDialog):
+    """Elige un backup (de backups/ o cualquier .zip) y lo carga, reemplazando los datos actuales."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Cargar desde backup")
+        self.setModal(True)
+        self.resize(660, 400)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        layout.addWidget(QLabel("Backups guardados:"))
+
+        self.tabla = QTableWidget(0, 3)
+        self.tabla.setObjectName("listaSimple")
+        self.tabla.setHorizontalHeaderLabels(["Archivo", "Fecha", "Tamaño"])
+        self.tabla.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tabla.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tabla.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tabla.setShowGrid(False)
+        self.tabla.setAlternatingRowColors(True)
+        self.tabla.verticalHeader().setVisible(False)
+        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tabla.setColumnWidth(1, 150)
+        self.tabla.setColumnWidth(2, 90)
+
+        self._rutas_por_fila = {}
+        backups = database.listar_backups()
+        self.tabla.setRowCount(len(backups))
+        for fila, ruta in enumerate(backups):
+            info = os.stat(ruta)
+            valores = (
+                os.path.basename(ruta),
+                datetime.fromtimestamp(info.st_mtime).strftime("%d/%m/%Y %H:%M"),
+                f"{info.st_size // 1024} KB",
+            )
+            for col, valor in enumerate(valores):
+                self.tabla.setItem(fila, col, QTableWidgetItem(valor))
+            self._rutas_por_fila[fila] = ruta
+        layout.addWidget(self.tabla, 1)
+
+        if not backups:
+            nota = QLabel("Todavía no hay backups en la carpeta backups/.")
+            nota.setStyleSheet(f"color: {COLOR_TEXTO_SUAVE}; font-size: 11px; background: transparent;")
+            layout.addWidget(nota)
+
+        pie = QHBoxLayout()
+        boton_cargar = QPushButton("Cargar seleccionado")
+        boton_cargar.setObjectName("botonAcento")
+        boton_cargar.clicked.connect(self._cargar_seleccionado)
+        boton_elegir = QPushButton("Elegir otro archivo...")
+        boton_elegir.clicked.connect(self._elegir_archivo)
+        boton_cerrar = QPushButton("Cerrar")
+        boton_cerrar.clicked.connect(self.reject)
+        pie.addWidget(boton_cargar)
+        pie.addWidget(boton_elegir)
+        pie.addStretch()
+        pie.addWidget(boton_cerrar)
+        layout.addLayout(pie)
+
+    def _cargar_seleccionado(self):
+        filas = self.tabla.selectionModel().selectedRows()
+        if not filas:
+            QMessageBox.warning(self, "Cargar backup", "Elegí un backup de la lista.")
+            return
+        self._confirmar_y_cargar(self._rutas_por_fila[filas[0].row()])
+
+    def _elegir_archivo(self):
+        ruta, _filtro = QFileDialog.getOpenFileName(
+            self, "Elegir backup", "", "Backup de expensas (*.zip);;Todos los archivos (*.*)")
+        if ruta:
+            self._confirmar_y_cargar(ruta)
+
+    def _confirmar_y_cargar(self, ruta):
+        pregunta = ("Esto reemplaza los edificios, unidades, historial y demás datos actuales por los del backup.\n\n"
+                    "Antes se guarda una copia de los datos actuales, por si hace falta volver atrás.\n\n"
+                    "La contraseña maestra y la configuración SMTP NO se tocan.\n\n"
+                    "¿Cargar este backup?")
+        if QMessageBox.question(self, "Cargar backup", pregunta) != QMessageBox.Yes:
+            return
+
+        try:
+            copia_previa = database.crear_backup()
+        except Exception as e:
+            manejar_error("No se pudo guardar la copia previa; no se cargó nada", e, self)
+            return
+
+        try:
+            cantidad = database.restaurar_backup(ruta)
+        except ValueError as e:
+            QMessageBox.critical(self, "Cargar backup", str(e))
+            return
+        except Exception as e:
+            manejar_error("No se pudo cargar el backup", e, self)
+            return
+
+        QMessageBox.information(
+            self, "Cargar backup",
+            f"Se cargaron {cantidad} archivos del backup.\n\n"
+            f"La copia de los datos anteriores quedó en:\n{copia_previa}")
+        self.parent()._cargar_edificios()
+        self.accept()
+
+
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1770,6 +3206,13 @@ class App(QMainWindow):
 
     def _crear_menu(self):
         menu_archivo = self.menuBar().addMenu("Archivo")
+        accion_backup = QAction("Copia de seguridad (backup)", self)
+        accion_backup.triggered.connect(self._hacer_backup)
+        menu_archivo.addAction(accion_backup)
+        accion_cargar_backup = QAction("Cargar desde backup...", self)
+        accion_cargar_backup.triggered.connect(self._abrir_cargar_backup)
+        menu_archivo.addAction(accion_cargar_backup)
+        menu_archivo.addSeparator()
         accion_salir = QAction("Salir", self)
         accion_salir.triggered.connect(self.close)
         menu_archivo.addAction(accion_salir)
@@ -1778,24 +3221,32 @@ class App(QMainWindow):
         accion_administrar = QAction("Administrar edificios/unidades", self)
         accion_administrar.triggered.connect(self._abrir_administracion)
         menu_admin.addAction(accion_administrar)
-        for nombre in ("Configuración de la inmobiliaria", "Mailing"):
-            accion = QAction(nombre, self)
-            accion.triggered.connect(lambda _, n=nombre: self._pendiente(n))
-            menu_admin.addAction(accion)
+        accion_config = QAction("Configuración de la inmobiliaria", self)
+        accion_config.triggered.connect(self._abrir_configuracion)
+        menu_admin.addAction(accion_config)
+        accion_mailing = QAction("Mailing", self)
+        accion_mailing.triggered.connect(self._abrir_mails)
+        menu_admin.addAction(accion_mailing)
         menu_admin.addSeparator()
         accion_maestro = QAction("Control maestro", self)
         accion_maestro.triggered.connect(self._abrir_control_maestro)
         menu_admin.addAction(accion_maestro)
 
-        for titulo, items in (
-            ("Ver", ("Historial de recibos", "Historial de mails")),
-            ("Ayuda", ("Recibo expensas", "Acerca de")),
-        ):
-            menu = self.menuBar().addMenu(titulo)
-            for nombre in items:
-                accion = QAction(nombre, self)
-                accion.triggered.connect(lambda _, n=nombre: self._pendiente(n))
-                menu.addAction(accion)
+        menu_ver = self.menuBar().addMenu("Ver")
+        accion_hist_recibos = QAction("Historial de recibos", self)
+        accion_hist_recibos.triggered.connect(self._abrir_historial)
+        menu_ver.addAction(accion_hist_recibos)
+        accion_hist_mails = QAction("Historial de mails", self)
+        accion_hist_mails.triggered.connect(self._abrir_historial_mails)
+        menu_ver.addAction(accion_hist_mails)
+
+        menu_ayuda = self.menuBar().addMenu("Ayuda")
+        accion_ayuda_recibos = QAction("Recibo expensas", self)
+        accion_ayuda_recibos.triggered.connect(self._mostrar_ayuda_recibos)
+        menu_ayuda.addAction(accion_ayuda_recibos)
+        accion_acerca_de = QAction("Acerca de", self)
+        accion_acerca_de.triggered.connect(self._mostrar_acerca_de)
+        menu_ayuda.addAction(accion_acerca_de)
 
     def _abrir_control_maestro(self):
         VentanaControlMaestro(self).show()
@@ -1808,6 +3259,75 @@ class App(QMainWindow):
                 self.lista_edificios.setCurrentItem(coincidencias[0])
 
         VentanaAdministracion(self, self._edificio_actual(), on_cambios=al_cambiar).show()
+
+    def _abrir_configuracion(self):
+        dialogo = VentanaConfiguracion(self)
+        dialogo.accepted.connect(self._cargar_logo_inmobiliaria)
+        dialogo.show()
+
+    def _abrir_mails(self):
+        VentanaMails(self, self._edificio_actual()).show()
+
+    def _abrir_historial(self):
+        VentanaHistorial(self).show()
+
+    def _abrir_historial_mails(self):
+        VentanaRegistroEnvios(self, self._edificio_actual()).show()
+
+    def _abrir_cargar_backup(self):
+        requerir_maestro(self, lambda: VentanaCargarBackup(self).show(), motivo="cargar un backup")
+
+    def _hacer_backup(self):
+        try:
+            ruta = database.crear_backup()
+        except Exception as e:
+            manejar_error("No se pudo crear la copia de seguridad", e, self)
+            return
+
+        QMessageBox.information(
+            self, "Copia de seguridad",
+            f"Backup creado correctamente en:\n\n{ruta}\n\n"
+            "No incluye la contraseña maestra, la configuración SMTP ni los PDF de los recibos.")
+
+        confirmado = QMessageBox.question(
+            self, "Copia de seguridad",
+            "¿Guardar también una copia en otro lugar (un pendrive, una carpeta en la nube, etc.)?")
+        if confirmado != QMessageBox.Yes:
+            return
+        destino, _filtro = QFileDialog.getSaveFileName(
+            self, "Guardar copia del backup", os.path.basename(ruta), "Backup (*.zip)")
+        if not destino:
+            return
+        try:
+            shutil.copy(ruta, destino)
+            QMessageBox.information(self, "Copia de seguridad", f"Copia guardada en:\n\n{destino}")
+        except Exception as e:
+            manejar_error("No se pudo guardar la copia en ese lugar", e, self)
+
+    def _mostrar_ayuda_recibos(self):
+        VentanaAyudaRecibos(self).show()
+
+    def _mostrar_acerca_de(self):
+        QMessageBox.information(
+            self, "Acerca de",
+            f"{config.APP_TITULO}\nVersión {config.APP_VERSION}\n\n"
+            "Aplicación de escritorio offline para la gestión de expensas.\n"
+            f"Carpeta de datos:\n{config.BASE_DIR}")
+
+    def closeEvent(self, event):
+        """Al cerrar (la X o Archivo → Salir): backup automático y silencioso, sin preguntar nada."""
+        try:
+            database.crear_backup(automatico=True)
+        except Exception as e:
+            logger.exception("No se pudo hacer la copia de seguridad automática al cerrar")
+            confirmado = QMessageBox.question(
+                self, "Copia de seguridad automática",
+                f"No se pudo hacer la copia de seguridad automática al cerrar:\n\n{e}\n\n"
+                "¿Cerrar igual, sin esa copia?")
+            if confirmado != QMessageBox.Yes:
+                event.ignore()
+                return
+        event.accept()
 
     def _pendiente(self, nombre):
         QMessageBox.information(self, nombre, "Todavía no está portado a esta versión de prueba (PySide6).")
@@ -1857,23 +3377,7 @@ class App(QMainWindow):
         self._crear_contenido(cuerpo)
 
     def _crear_sidebar(self, cuerpo):
-        sidebar = QWidget()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(220)
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(16, 20, 16, 20)
-        sidebar_layout.setSpacing(10)
-
-        titulo = QLabel("EDIFICIOS")
-        titulo.setObjectName("tituloSidebar")
-        sidebar_layout.addWidget(titulo)
-
-        self.lista_edificios = QListWidget()
-        self.lista_edificios.setFocusPolicy(Qt.NoFocus)
-        self.lista_edificios.currentItemChanged.connect(lambda *_: self._cargar_unidades())
-        sidebar_layout.addWidget(self.lista_edificios, 1)
-
-        cuerpo.addWidget(sidebar)
+        self.lista_edificios = _crear_sidebar_edificios(cuerpo, [], self._cargar_unidades)
 
     def _edificio_actual(self):
         item = self.lista_edificios.currentItem()
@@ -2029,6 +3533,19 @@ class App(QMainWindow):
         layout.addWidget(chip)
         layout.addStretch()
         return contenedor
+
+    @staticmethod
+    def _crear_casilla_demo():
+        """Checkbox centrado, sin conectar a nada (para los ejemplos de VentanaAyudaRecibos)."""
+        contenedor = QWidget()
+        contenedor.setStyleSheet("background: transparent;")
+        layout = QHBoxLayout(contenedor)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addStretch()
+        casilla = QCheckBox()
+        layout.addWidget(casilla)
+        layout.addStretch()
+        return contenedor, casilla
 
     def _crear_casilla(self, uid):
         """Checkbox centrado en la celda (el checkbox de un QTableWidgetItem se dibuja
@@ -2188,7 +3705,6 @@ class App(QMainWindow):
                 self, "Planilla de pagos",
                 f"La planilla de «{edificio}» faltaba: se rearmó en blanco.\n\n"
                 "Los montos anteriores no están: hay que cargarlos de nuevo.")
-        from utils import abrir_pdf
         ok, mensaje = abrir_pdf(ruta)
         if not ok:
             QMessageBox.information(self, "Planilla de pagos", mensaje)
@@ -2349,18 +3865,22 @@ class App(QMainWindow):
                         "inmo_email": inmobiliaria.get("email", ""),
                     }
                     database.append_historial(registro)
-                    generados.append(etiqueta_unidad(u, por_id) + sufijo)
+                    generados.append((registro, etiqueta_unidad(u, por_id) + sufijo))
                 except Exception as e:
                     errores.append(f"{etiqueta_unidad(u, por_id)}: {e}")
 
-            self._recargar_unidades()
+            self._recargar_unidades()      # los círculos de "recibo emitido" pasan a verde
 
-            mensaje = f"Se generaron {len(generados)} de {len(plan)} recibo(s)."
             if generados:
-                mensaje += "\n\n" + "\n".join(f"  {g}" for g in generados)
+                VentanaRecibosGenerados(self, generados, len(plan), errores).show()
+                return
+
+            mensaje = f"Se generaron {len(generados)} de {len(plan)} recibo(s).\n\nCarpeta:\n{carpeta_destino}"
             if errores:
-                mensaje += "\n\nErrores:\n" + "\n".join(f"  {e}" for e in errores)
-            QMessageBox.information(self, "Recibos generados", mensaje)
+                mensaje += "\n\nUnidades con error:\n" + "\n".join(errores)
+                QMessageBox.warning(self, "Generación con errores", mensaje)
+            else:
+                QMessageBox.information(self, "Recibos generados", mensaje)
         except Exception as e:
             manejar_error("No se pudieron generar los recibos", e, self)
 
