@@ -60,8 +60,7 @@ editables.
 | Desarrollo | Windows, Python 3.11 o superior |
 
 Dependencias de Python (`requirements.txt`): `xhtml2pdf`, `openpyxl`,
-`pillow` y `pyinstaller`. La interfaz utiliza Tkinter, incluido en la
-instalación estándar de Python.
+`pillow`, `pyinstaller` y `PySide6`. La interfaz utiliza PySide6 (Qt).
 
 ## 3. Instalación y ejecución
 
@@ -124,10 +123,11 @@ SistemaExpensas/
 ├── pdf_generator.py        Generación del PDF desde la plantilla
 ├── maestro.py               Contraseña maestra (hasheada) de las pantallas de administración
 ├── correo.py                Envío de recibos por mail: direcciones, SMTP y registro de envíos
-├── ui.py                   Interfaz gráfica (Tkinter)
+├── ui.py                   Interfaz gráfica (PySide6/Qt)
 ├── requirements.txt
 ├── construir_exe.bat
 │
+├── recursos_qt/            Iconos propios de la interfaz (flecha del combo, tilde del checkbox)
 ├── plantilla/              Diseño del recibo (editable)
 │   ├── recibo.html         Plantilla única del recibo
 │   ├── estilo.css          Colores, tipografías y disposición

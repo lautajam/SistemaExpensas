@@ -13,8 +13,8 @@ Se encarga de:
 
 import logging
 import sys
-import tkinter as tk
-from tkinter import messagebox
+
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 import database
 from logging_config import configurar_logging
@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 def main():
     configurar_logging()
+    app = QApplication(sys.argv)
+    sys.excepthook = _loguear_error_no_manejado
 
     try:
         database.ensure_data_files()
@@ -37,30 +39,29 @@ def main():
         sys.exit(1)
 
     try:
-        app = App()
-        app.report_callback_exception = _loguear_error_callback
-        app.mainloop()
+        ventana = App()
+        ventana.show()
     except Exception as e:
         logger.exception("Error inesperado, la aplicación debe cerrarse")
         _mostrar_error_fatal(f"La aplicación encontró un error inesperado y debe cerrarse.\n\nDetalle: {e}")
         sys.exit(1)
 
+    sys.exit(app.exec())
 
-def _loguear_error_callback(exc, val, tb):
-    """Tkinter llama a esto cuando un callback (botón, evento, etc.) tira una excepción
-    sin capturarla; por default solo se imprime a stderr y en el .exe eso se pierde."""
-    logger.error("Error no manejado en un callback de la interfaz", exc_info=(exc, val, tb))
+
+def _loguear_error_no_manejado(exc_type, exc, tb):
+    """Qt no interrumpe la app si un callback (botón, evento, etc.) tira una excepción sin
+    capturarla; por default solo se imprime a stderr y en el .exe eso se pierde."""
+    logger.error("Error no manejado en un callback de la interfaz", exc_info=(exc_type, exc, tb))
 
 
 def _mostrar_error_fatal(mensaje):
     try:
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror("Sistema de Expensas - Error", mensaje)
-        root.destroy()
+        QMessageBox.critical(None, "Sistema de Expensas - Error", mensaje)
     except Exception:
         # Si ni siquiera se puede mostrar una ventana, se imprime en consola.
         print(mensaje)
+
 
 if __name__ == "__main__":
     main()
