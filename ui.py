@@ -1507,6 +1507,7 @@ class VentanaAsignarCeldas(QDialog):
         tabla.setObjectName("listaSimple")
         tabla.horizontalHeader().hide()
         tabla.verticalHeader().hide()
+        tabla.verticalHeader().setDefaultSectionSize(36)
         tabla.setShowGrid(False)
         tabla.setEditTriggers(QAbstractItemView.AllEditTriggers)
         tabla.setSelectionMode(QAbstractItemView.NoSelection)
@@ -1527,6 +1528,7 @@ class VentanaAsignarCeldas(QDialog):
             tabla.setCellWidget(fila, 1, campo)
             self._campos_celda[u["id"]] = campo
         tabla.resizeColumnToContents(0)
+        tabla.resizeRowsToContents()
         if not filas:
             layout.addWidget(QLabel("Este edificio todavía no tiene unidades."))
 
@@ -2151,7 +2153,7 @@ class VentanaMails(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Mailing")
         self.setModal(True)
-        self.resize(980, 560)
+        self.resize(1300, 560)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 16)
@@ -2189,6 +2191,8 @@ class VentanaMails(QDialog):
         self.tabla.setObjectName("listaSimple")
         self.tabla.setHorizontalHeaderLabels(["Unidad", "Inquilino 1", "Inquilino 2", "Dueño 1", "Dueño 2"])
         self.tabla.verticalHeader().setVisible(False)
+        self.tabla.verticalHeader().setDefaultSectionSize(36)
+        self.tabla.horizontalHeader().setFixedHeight(32)
         self.tabla.setShowGrid(False)
         self.tabla.setSelectionMode(QAbstractItemView.NoSelection)
         self.tabla.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -2246,12 +2250,17 @@ class VentanaMails(QDialog):
             variables = {}
             for col, campo in enumerate(correo.EMAILS_CAMPOS[1:], start=1):
                 entrada = QLineEdit(existentes.get(campo, ""))
+                entrada.setCursorPosition(0)   # si el mail es largo, que se vea desde el principio
                 self.tabla.setCellWidget(fila, col, entrada)
                 variables[campo] = entrada
             self._campos_por_unidad[u["id"]] = variables
         if not todas:
             self.tabla.setRowCount(1)
             self.tabla.setItem(0, 0, QTableWidgetItem("Este edificio todavía no tiene unidades."))
+
+        # Un alto de fila fijo a veces queda corto según la fuente/escala de pantalla real;
+        # esto mide el alto que necesita cada QLineEdit ya puesto y ajusta la fila a eso.
+        self.tabla.resizeRowsToContents()
 
     def _guardar(self):
         invalidas = []
@@ -2738,6 +2747,7 @@ class VentanaHistorial(_AbreRecibosMixin, _EnviarPorMailMixin, QDialog):
                     self.tabla.setItem(fila, col, item)
             self._archivo_por_fila[fila] = r.get("archivo", "")
             self._filas_por_fila[fila] = r
+        self.tabla.resizeRowsToContents()
 
 
 # ===========================================================================
@@ -2808,6 +2818,7 @@ class VentanaRecibosGenerados(_AbreRecibosMixin, _EnviarPorMailMixin, QDialog):
                     self.tabla.setItem(fila, col, item)
             self._archivo_por_fila[fila] = r["archivo"]
             self._filas_por_fila[fila] = r
+        self.tabla.resizeRowsToContents()
 
         if errores:
             lbl_errores = QLabel("Unidades con error:\n" + "\n".join(errores))
@@ -3268,15 +3279,22 @@ class App(QMainWindow):
             if coincidencias:
                 self.lista_edificios.setCurrentItem(coincidencias[0])
 
-        VentanaAdministracion(self, self._edificio_actual(), on_cambios=al_cambiar).show()
+        def abrir():
+            VentanaAdministracion(self, self._edificio_actual(), on_cambios=al_cambiar).show()
+
+        requerir_maestro(self, abrir, motivo="abrir Administrar edificios y unidades")
 
     def _abrir_configuracion(self):
-        dialogo = VentanaConfiguracion(self)
-        dialogo.accepted.connect(self._cargar_logo_inmobiliaria)
-        dialogo.show()
+        def abrir():
+            dialogo = VentanaConfiguracion(self)
+            dialogo.accepted.connect(self._cargar_logo_inmobiliaria)
+            dialogo.show()
+
+        requerir_maestro(self, abrir, motivo="abrir la Configuración de la inmobiliaria")
 
     def _abrir_mails(self):
-        VentanaMails(self, self._edificio_actual()).show()
+        requerir_maestro(
+            self, lambda: VentanaMails(self, self._edificio_actual()).show(), motivo="abrir Mailing")
 
     def _abrir_historial(self):
         VentanaHistorial(self).show()
@@ -3623,6 +3641,7 @@ class App(QMainWindow):
 
                 self._unidades_por_id[u["id"]] = u
                 self._fila_por_id[u["id"]] = fila
+            self.tabla.resizeRowsToContents()
         except Exception as e:
             manejar_error("No se pudieron cargar las unidades", e, self)
 

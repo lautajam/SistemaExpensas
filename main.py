@@ -14,6 +14,13 @@ Se encarga de:
 import logging
 import sys
 
+# pdf_generator (xhtml2pdf -> pyhanko -> certifi) se importa ANTES que PySide6 a propósito:
+# PySide6 instala un import hook (shibokensupport) para su sistema de "features" que
+# intercepta todos los imports posteriores, y choca con esa cadena de módulos (se cuelga
+# en certifi/core.py). Importándola primero, ya queda cacheada en sys.modules y el resto
+# del código (ui.py incluido) la usa sin volver a disparar esa cadena de imports.
+import pdf_generator  # noqa: F401
+
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 import database
