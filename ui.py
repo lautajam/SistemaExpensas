@@ -1604,23 +1604,28 @@ class VentanaAdministracion(QDialog):
         self.on_cambios = on_cambios
         self.setWindowTitle("Administrar edificios y unidades")
         self.setModal(True)
-        self.resize(1080, 560)
+        self.resize(1300, 560)
 
-        layout = QVBoxLayout(self)
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        layout_externo.setSpacing(0)
+
+        cuerpo = QHBoxLayout()
+        cuerpo.setContentsMargins(0, 0, 0, 0)
+        cuerpo.setSpacing(0)
+        layout_externo.addLayout(cuerpo, 1)
+
+        self.lista_edificios = _crear_sidebar_edificios(
+            cuerpo, database.get_nombres_edificios(), self._recargar)
+
+        contenedor = QWidget()
+        layout = QVBoxLayout(contenedor)
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(10)
+        cuerpo.addWidget(contenedor, 1)
 
         top = QHBoxLayout()
         top.setSpacing(8)
-        top.addWidget(QLabel("Edificio:"))
-        self.combo_edificio = QComboBox()
-        self.combo_edificio.addItems(database.get_nombres_edificios())
-        self.combo_edificio.setCurrentText(edificio_inicial)
-        self.combo_edificio.setMinimumWidth(240)
-        _estilizar_combo(self.combo_edificio)
-        self.combo_edificio.currentIndexChanged.connect(self._recargar)
-        top.addWidget(self.combo_edificio)
-
         boton_datos = QPushButton("Datos del consorcio")
         boton_datos.setObjectName("botonAcento")
         boton_datos.clicked.connect(self._datos_consorcio)
@@ -1672,13 +1677,24 @@ class VentanaAdministracion(QDialog):
         layout.addLayout(pie)
 
         self._unidades_por_fila = {}
+        coincidencias = self.lista_edificios.findItems(edificio_inicial, Qt.MatchExactly)
+        self.lista_edificios.blockSignals(True)
+        if coincidencias:
+            self.lista_edificios.setCurrentItem(coincidencias[0])
+        elif self.lista_edificios.count():
+            self.lista_edificios.setCurrentRow(0)
+        self.lista_edificios.blockSignals(False)
         self._recargar()
+
+    def _edificio_actual(self):
+        item = self.lista_edificios.currentItem()
+        return item.text() if item else ""
 
     def _recargar(self):
         self.tabla.setRowCount(0)
         self._unidades_por_fila = {}
 
-        edificio = self.combo_edificio.currentText()
+        edificio = self._edificio_actual()
         todas = database.get_unidades_por_edificio(edificio)
         por_id = indice_por_id(todas)
         filas = ordenar_con_asociadas(todas)
@@ -1708,20 +1724,20 @@ class VentanaAdministracion(QDialog):
         return self._unidades_por_fila.get(filas[0].row())
 
     def _asignar_celdas(self):
-        edificio = self.combo_edificio.currentText()
+        edificio = self._edificio_actual()
         if not edificio:
             QMessageBox.warning(self, "Atención", "Primero seleccioná o creá un edificio.")
             return
         VentanaAsignarCeldas(self, edificio, on_guardar=self._recargar).show()
 
     def _datos_consorcio(self):
-        edificio = self.combo_edificio.currentText()
+        edificio = self._edificio_actual()
         if not edificio:
             QMessageBox.warning(self, "Atención", "Primero seleccioná o creá un edificio.")
             return
 
         def al_guardar(nombre_nuevo):
-            self._refrescar_combo_edificios(nombre_nuevo)
+            self._refrescar_lista_edificios(nombre_nuevo)
 
         DialogoDatosConsorcio(self, edificio, on_guardar=al_guardar).show()
 
@@ -1734,31 +1750,32 @@ class VentanaAdministracion(QDialog):
 
     def _nuevo_edificio(self):
         def al_guardar(nombre):
-            self._refrescar_combo_edificios(nombre)
+            self._refrescar_lista_edificios(nombre)
         DialogoEdificioNuevo(self, on_guardar=al_guardar).show()
 
-    def _refrescar_combo_edificios(self, nombre_a_elegir):
-        self.combo_edificio.blockSignals(True)
-        self.combo_edificio.clear()
-        self.combo_edificio.addItems(database.get_nombres_edificios())
-        self.combo_edificio.setCurrentText(nombre_a_elegir)
-        self.combo_edificio.blockSignals(False)
+    def _refrescar_lista_edificios(self, nombre_a_elegir):
+        self.lista_edificios.blockSignals(True)
+        self.lista_edificios.clear()
+        self.lista_edificios.addItems(database.get_nombres_edificios())
+        coincidencias = self.lista_edificios.findItems(nombre_a_elegir, Qt.MatchExactly)
+        if coincidencias:
+            self.lista_edificios.setCurrentItem(coincidencias[0])
+        self.lista_edificios.blockSignals(False)
         self._recargar()
 
     def _borrar_edificio(self):
-        edificio = self.combo_edificio.currentText()
+        edificio = self._edificio_actual()
         if not edificio:
             QMessageBox.warning(self, "Atención", "Primero seleccioná un edificio.")
             return
 
         def al_borrar(destino):
-            nombres = database.get_nombres_edificios()
-            self.combo_edificio.blockSignals(True)
-            self.combo_edificio.clear()
-            self.combo_edificio.addItems(nombres)
-            if nombres:
-                self.combo_edificio.setCurrentIndex(0)
-            self.combo_edificio.blockSignals(False)
+            self.lista_edificios.blockSignals(True)
+            self.lista_edificios.clear()
+            self.lista_edificios.addItems(database.get_nombres_edificios())
+            if self.lista_edificios.count():
+                self.lista_edificios.setCurrentRow(0)
+            self.lista_edificios.blockSignals(False)
             self._recargar()
             QMessageBox.information(
                 self, "Edificio borrado",
@@ -1767,7 +1784,7 @@ class VentanaAdministracion(QDialog):
         DialogoBorrarEdificio(self, edificio, on_borrado=al_borrar).show()
 
     def _nueva_unidad(self):
-        edificio = self.combo_edificio.currentText()
+        edificio = self._edificio_actual()
         if not edificio:
             QMessageBox.warning(self, "Atención", "Primero seleccioná o creá un edificio.")
             return
@@ -1778,10 +1795,10 @@ class VentanaAdministracion(QDialog):
         if not unidad:
             QMessageBox.information(self, "Editar unidad", "Seleccioná primero una unidad de la lista.")
             return
-        DialogoUnidad(self, self.combo_edificio.currentText(), unidad=unidad, on_guardar=self._recargar).show()
+        DialogoUnidad(self, self._edificio_actual(), unidad=unidad, on_guardar=self._recargar).show()
 
     def _abrir_carpeta(self):
-        edificio = self.combo_edificio.currentText()
+        edificio = self._edificio_actual()
         if not edificio:
             return
         carpeta = database.carpeta_edificio(edificio)
@@ -2153,22 +2170,28 @@ class VentanaMails(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Mailing")
         self.setModal(True)
-        self.resize(1300, 560)
+        self.resize(1480, 560)
 
-        layout = QVBoxLayout(self)
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        layout_externo.setSpacing(0)
+
+        cuerpo = QHBoxLayout()
+        cuerpo.setContentsMargins(0, 0, 0, 0)
+        cuerpo.setSpacing(0)
+        layout_externo.addLayout(cuerpo, 1)
+
+        self.lista_edificios = _crear_sidebar_edificios(
+            cuerpo, database.get_nombres_edificios(), self._cargar)
+
+        contenedor = QWidget()
+        layout = QVBoxLayout(contenedor)
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(8)
+        cuerpo.addWidget(contenedor, 1)
 
         top = QHBoxLayout()
         top.setSpacing(8)
-        top.addWidget(QLabel("Edificio:"))
-        self.combo_edificio = QComboBox()
-        self.combo_edificio.addItems(database.get_nombres_edificios())
-        self.combo_edificio.setCurrentText(edificio_inicial)
-        self.combo_edificio.setMinimumWidth(220)
-        _estilizar_combo(self.combo_edificio)
-        self.combo_edificio.currentIndexChanged.connect(self._cargar)
-        top.addWidget(self.combo_edificio)
         top.addStretch()
         boton_plantilla = QPushButton("Asunto y cuerpo del mail")
         boton_plantilla.clicked.connect(self._editar_plantilla)
@@ -2213,7 +2236,18 @@ class VentanaMails(QDialog):
         layout.addLayout(botones)
 
         self._campos_por_unidad = {}
+        coincidencias = self.lista_edificios.findItems(edificio_inicial, Qt.MatchExactly)
+        self.lista_edificios.blockSignals(True)
+        if coincidencias:
+            self.lista_edificios.setCurrentItem(coincidencias[0])
+        elif self.lista_edificios.count():
+            self.lista_edificios.setCurrentRow(0)
+        self.lista_edificios.blockSignals(False)
         self._cargar()
+
+    def _edificio_actual(self):
+        item = self.lista_edificios.currentItem()
+        return item.text() if item else ""
 
     def _config_smtp(self):
         DialogoConfiguracionSMTP(self).show()
@@ -2222,7 +2256,7 @@ class VentanaMails(QDialog):
         DialogoCopiaMail(self).show()
 
     def _editar_plantilla(self):
-        edificio = self.combo_edificio.currentText()
+        edificio = self._edificio_actual()
         if not edificio:
             QMessageBox.warning(self, "Atención", "Elegí primero un edificio.")
             return
@@ -2232,7 +2266,7 @@ class VentanaMails(QDialog):
         self.tabla.setRowCount(0)
         self._campos_por_unidad = {}
 
-        edificio = self.combo_edificio.currentText()
+        edificio = self._edificio_actual()
         if not edificio:
             return
         todas = database.get_unidades_por_edificio(edificio)
