@@ -23,14 +23,16 @@ unidades.py: esta ventana es solo una capa de presentación sobre la misma
 lógica de negocio.
 """
 
+import ctypes
 import logging
 import os
 import shutil
+import sys
 from datetime import date, datetime
 
 _DIR_RECURSOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recursos_qt").replace("\\", "/")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QAction, QColor, QFont, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -676,6 +678,35 @@ def confirmar_modo_celdas(parent, edificio):
         "Las unidades sin celda no van a poder generar recibo hasta que se les asigne una.\n\n"
         "¿Continuar?",
     ) == QMessageBox.Yes
+
+
+def _oscurecer_barra_titulo(widget):
+    """En Windows, pinta la barra de título nativa (donde están minimizar/maximizar/cerrar)
+    en oscuro, para que haga juego con el contenido de la ventana. Sin esto, Windows la
+    dibuja blanca por default, aunque todo lo de adentro sea oscuro. No hace nada si falla
+    (ej. versión de Windows vieja): la app sigue andando igual, solo queda la barra clara."""
+    if sys.platform != "win32":
+        return
+    try:
+        hwnd = int(widget.winId())
+        valor = ctypes.c_int(1)
+        for atributo in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE: 20 desde Windows 10 20H1, 19 antes
+            resultado = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, atributo, ctypes.byref(valor), ctypes.sizeof(valor))
+            if resultado == 0:
+                break
+    except Exception:
+        logger.debug("No se pudo oscurecer la barra de título de la ventana", exc_info=True)
+
+
+class _OscurecedorBarraTitulo(QObject):
+    """Filtro de eventos de toda la app: apenas se muestra una ventana nueva (la principal
+    o cualquier diálogo), le oscurece la barra de título. Se instala una sola vez."""
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Show and isinstance(obj, QWidget) and obj.isWindow():
+            _oscurecer_barra_titulo(obj)
+        return False
 
 
 def _estilizar_combo(combo):
@@ -3240,6 +3271,12 @@ class App(QMainWindow):
         paleta.setColor(QPalette.Highlight, QColor(COLOR_ACENTO))
         paleta.setColor(QPalette.HighlightedText, QColor("white"))
         QApplication.setPalette(paleta)
+        # Oscurece la barra de título nativa de esta ventana y de cualquier diálogo que se
+        # abra después (Administrar, Configuración, etc.), para que no quede blanca arriba
+        # de todo el contenido oscuro. Hay que guardar la referencia: si no, Python la
+        # destruye enseguida y el filtro deja de funcionar.
+        self._oscurecedor_barra_titulo = _OscurecedorBarraTitulo(self)
+        QApplication.instance().installEventFilter(self._oscurecedor_barra_titulo)
         self.setWindowTitle(config.APP_TITULO)
         self.resize(1260, 680)
         self.setMinimumSize(1100, 580)

@@ -64,8 +64,14 @@ REM importa sus submodulos (code128, etc.) de forma dinamica, y PyInstaller no
 REM los detecta solo. Sin esto, el .exe funciona en la PC donde se compilo
 REM (reportlab esta instalado ahi) pero falla en cualquier otra con
 REM "ModuleNotFoundError: No module named 'reportlab.graphics.barcode.code128'".
+REM
+REM --add-data "recursos_qt;recursos_qt": los iconos propios de la interfaz (flecha del
+REM combo, tilde del checkbox, icono de la app) no se detectan solos, hay que empaquetarlos
+REM a mano. --icon pone el icono del archivo .exe (Explorador/barra de tareas).
 python -m PyInstaller --noconfirm --onefile --windowed ^
     --name "SistemaExpensas" ^
+    --icon "recursos_qt\icono.ico" ^
+    --add-data "recursos_qt;recursos_qt" ^
     --collect-submodules=reportlab.graphics.barcode ^
     main.py
 

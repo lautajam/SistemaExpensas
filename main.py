@@ -12,6 +12,7 @@ Se encarga de:
 """
 
 import logging
+import os
 import sys
 
 # pdf_generator (xhtml2pdf -> pyhanko -> certifi) se importa ANTES que PySide6 a propósito:
@@ -21,6 +22,7 @@ import sys
 # del código (ui.py incluido) la usa sin volver a disparar esa cadena de imports.
 import pdf_generator  # noqa: F401
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 import database
@@ -29,10 +31,13 @@ from ui import App
 
 logger = logging.getLogger(__name__)
 
+_RUTA_ICONO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recursos_qt", "icono.ico")
+
 
 def main():
     configurar_logging()
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(_RUTA_ICONO))
     sys.excepthook = _loguear_error_no_manejado
 
     try:
