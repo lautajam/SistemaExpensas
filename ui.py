@@ -37,6 +37,7 @@ from PySide6.QtGui import QAction, QColor, QFont, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -52,6 +53,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QTableWidget,
     QTableWidgetItem,
@@ -280,6 +282,19 @@ QCheckBox::indicator:checked {{
     background-color: {COLOR_ACENTO};
     border-color: {COLOR_ACENTO};
     image: url({_DIR_RECURSOS}/check.png);
+}}
+
+QRadioButton {{ background: transparent; color: {COLOR_TEXTO}; font-size: 12px; spacing: 8px; }}
+QRadioButton::indicator {{
+    width: 16px; height: 16px;
+    border: 1px solid {COLOR_BORDE};
+    border-radius: 8px;
+    background-color: {COLOR_TARJETA_ALT};
+}}
+QRadioButton::indicator:hover {{ border-color: {COLOR_ACENTO}; }}
+QRadioButton::indicator:checked {{
+    background-color: {COLOR_ACENTO};
+    border-color: {COLOR_ACENTO};
 }}
 
 QTableWidget {{
@@ -766,6 +781,60 @@ def _crear_sidebar_edificios(cuerpo, nombres, al_cambiar):
     return lista
 
 
+def _crear_grupo_radio(opciones, al_cambiar=None, vertical=False, permitir_ninguna=False):
+    """Fila (o columna) de QRadioButton excluyentes entre sí: todas las opciones quedan
+    escritas y a la vista, sin necesidad de desplegar nada para elegir una.
+    permitir_ninguna=True habilita un estado inicial sin nada tildado (un QButtonGroup
+    exclusivo de Qt no deja volver a 'ninguna' una vez que se tildó una), haciendo la
+    exclusividad a mano en vez de con QButtonGroup.setExclusive."""
+    contenedor = QWidget()
+    contenedor.setStyleSheet("background: transparent;")
+    disposicion = QVBoxLayout(contenedor) if vertical else QHBoxLayout(contenedor)
+    disposicion.setContentsMargins(0, 0, 0, 0)
+    disposicion.setSpacing(4 if vertical else 16)
+
+    grupo = QButtonGroup(contenedor)
+    grupo.setExclusive(not permitir_ninguna)
+    botones = {}
+    for texto in opciones:
+        boton = QRadioButton(texto)
+        boton.setCursor(Qt.PointingHandCursor)
+        grupo.addButton(boton)
+        disposicion.addWidget(boton)
+        botones[texto] = boton
+    if not vertical:
+        disposicion.addStretch()
+
+    def _al_tildar(boton_tildado, marcado):
+        if not marcado:
+            return
+        if permitir_ninguna:   # sin exclusividad nativa: destildamos las demás a mano
+            for boton in botones.values():
+                if boton is not boton_tildado:
+                    boton.setChecked(False)
+        if al_cambiar:
+            al_cambiar()
+
+    # OJO: QButtonGroup.buttonToggled no es un signal "normal" del botón, así que
+    # boton.blockSignals() no lo frena (se verificó a mano); hay que bloquear el grupo.
+    grupo.buttonToggled.connect(_al_tildar)
+
+    contenedor.grupo_radio = grupo  # referencia viva (si no, Python la recolecta) y para blockSignals
+    return contenedor, botones
+
+
+def _radio_seleccionado(botones):
+    return next((texto for texto, boton in botones.items() if boton.isChecked()), None)
+
+
+def _marcar_radio(contenedor, botones, texto):
+    """Marca la opción 'texto' (o ninguna) sin disparar al_cambiar."""
+    contenedor.grupo_radio.blockSignals(True)
+    for t, boton in botones.items():
+        boton.setChecked(t == texto)
+    contenedor.grupo_radio.blockSignals(False)
+
+
 # Cómo paga una cochera/baulera de un depto: (código guardado, texto para elegir, texto corto de la lista)
 MODOS_PAGO = [
     (MODO_APARTE, "Recibo aparte", "recibo aparte"),
@@ -775,6 +844,13 @@ MODOS_PAGO = [
 _TEXTO_MODO = {cod: largo for cod, largo, _corto in MODOS_PAGO}
 _CORTO_MODO = {cod: corto for cod, _largo, corto in MODOS_PAGO}
 _CODIGO_MODO = {largo: cod for cod, largo, _corto in MODOS_PAGO}
+
+# Textos cortos para los grupos de radio buttons de "cómo paga" (DialogoUnidad): más cortos
+# que _TEXTO_MODO porque ahí se ven las tres opciones juntas, no una sola como en un combo.
+_TEXTO_MODO_RADIO = {MODO_APARTE: "Recibo aparte", MODO_JUNTO: "Junto con depto", MODO_TOTAL: "Incluida en depto"}
+_CODIGO_MODO_RADIO = {texto: cod for cod, texto in _TEXTO_MODO_RADIO.items()}
+
+_TIPOS_POR_NOMBRE = {nombre_tipo(t): t for t in TIPOS}
 
 
 # ===========================================================================
@@ -817,17 +893,10 @@ class DialogoAsociada(QDialog):
         layout.addLayout(grilla)
         self.campo_unidad.setFocus()
 
-        nota = QLabel("El inquilino es el del depto.")
+        nota = QLabel("El inquilino es el del depto. Cómo paga se elige después, en la lista de cocheras y bauleras.")
         nota.setStyleSheet(f"color: {COLOR_TEXTO_SUAVE}; font-size: 10px; background: transparent;")
+        nota.setWordWrap(True)
         layout.addWidget(nota)
-
-        fila_modo = QHBoxLayout()
-        fila_modo.addWidget(QLabel("Cómo paga:"))
-        self.combo_modo = QComboBox()
-        self.combo_modo.addItems([largo for _c, largo, _k in MODOS_PAGO])
-        _estilizar_combo(self.combo_modo)
-        fila_modo.addWidget(self.combo_modo)
-        layout.addLayout(fila_modo)
 
         botones = QHBoxLayout()
         boton_agregar = QPushButton("Agregar")
@@ -850,7 +919,6 @@ class DialogoAsociada(QDialog):
         except ValueError as e:
             QMessageBox.warning(self, "Celda inválida", str(e))
             return
-        modo = _CODIGO_MODO[self.combo_modo.currentText()]
         self.on_agregar({
             "tipo": self.tipo,
             "unidad": numero,
@@ -858,8 +926,8 @@ class DialogoAsociada(QDialog):
             "piso": self.campo_piso.text().strip(),
             "dueno": self.campo_dueno.text().strip(),
             "importe": parse_importe(self.campo_importe.text()),
-            "paga_junto": modo,
-            "celda": "" if modo == MODO_TOTAL else celda,
+            "paga_junto": MODO_APARTE,
+            "celda": celda,
         })
         self.accept()
 
@@ -962,12 +1030,10 @@ class DialogoUnidad(QDialog):
         self._grilla.addWidget(self.campo_celda, 0, 1)
 
         self._grilla.addWidget(QLabel("Tipo de unidad:"), 1, 0)
-        self.combo_tipo = QComboBox()
-        self.combo_tipo.addItems([nombre_tipo(t) for t in TIPOS])
-        self.combo_tipo.setCurrentText(nombre_tipo(tipo_actual))
-        _estilizar_combo(self.combo_tipo)
-        self.combo_tipo.currentIndexChanged.connect(self._actualizar_tipo)
-        self._grilla.addWidget(self.combo_tipo, 1, 1)
+        self._fila_tipo, self._botones_tipo = _crear_grupo_radio(
+            [nombre_tipo(t) for t in TIPOS], al_cambiar=self._actualizar_tipo)
+        _marcar_radio(self._fila_tipo, self._botones_tipo, nombre_tipo(tipo_actual))
+        self._grilla.addWidget(self._fila_tipo, 1, 1)
 
         self.lbl_piso = QLabel("")
         self._grilla.addWidget(self.lbl_piso, 2, 0)
@@ -1001,7 +1067,7 @@ class DialogoUnidad(QDialog):
         # --- depto: lista de cocheras/bauleras asociadas ---
         self.frame_asociadas = QWidget()
         frame_layout = QVBoxLayout(self.frame_asociadas)
-        frame_layout.setContentsMargins(0, 8, 0, 0)
+        frame_layout.setContentsMargins(12, 8, 12, 8)
         frame_layout.setSpacing(4)
         titulo_asoc = QLabel("Cocheras y bauleras de este depto:")
         titulo_asoc.setStyleSheet(f"color: {COLOR_TEXTO}; font-weight: 700; background: transparent;")
@@ -1036,26 +1102,24 @@ class DialogoUnidad(QDialog):
         barra.addStretch()
         frame_layout.addLayout(barra)
         fila_modo = QHBoxLayout()
+        fila_modo.setAlignment(Qt.AlignVCenter)
         fila_modo.addWidget(QLabel("Cómo paga la elegida:"))
-        self.combo_modo_item = QComboBox()
-        self.combo_modo_item.addItem("")
-        self.combo_modo_item.addItems([largo for _c, largo, _k in MODOS_PAGO])
-        _estilizar_combo(self.combo_modo_item)
-        self.combo_modo_item.currentIndexChanged.connect(self._fijar_modo_item)
-        fila_modo.addWidget(self.combo_modo_item)
+        self._fila_modo_item, self._botones_modo_item = _crear_grupo_radio(
+            list(_TEXTO_MODO_RADIO.values()), al_cambiar=self._fijar_modo_item, permitir_ninguna=True)
+        fila_modo.addWidget(self._fila_modo_item)
         frame_layout.addLayout(fila_modo)
         layout.addWidget(self.frame_asociadas)
 
         # Cochera/baulera: "cómo paga" propio (ocupa el lugar de la lista, que solo se ve en un depto)
         self.fila_modo_asoc = QWidget()
         fila_modo_asoc_layout = QHBoxLayout(self.fila_modo_asoc)
-        fila_modo_asoc_layout.setContentsMargins(0, 8, 0, 0)
+        fila_modo_asoc_layout.setContentsMargins(12, 8, 12, 8)
+        fila_modo_asoc_layout.setAlignment(Qt.AlignVCenter)
         fila_modo_asoc_layout.addWidget(QLabel("Cómo paga:"))
-        self.combo_modo_asoc = QComboBox()
-        self.combo_modo_asoc.addItems([largo for _c, largo, _k in MODOS_PAGO])
-        self.combo_modo_asoc.setCurrentText(_TEXTO_MODO[modo_pago(unidad) if unidad else MODO_APARTE])
-        _estilizar_combo(self.combo_modo_asoc)
-        fila_modo_asoc_layout.addWidget(self.combo_modo_asoc)
+        self._fila_modo_asoc_radio, self._botones_modo_asoc = _crear_grupo_radio(list(_TEXTO_MODO_RADIO.values()))
+        _marcar_radio(self._fila_modo_asoc_radio, self._botones_modo_asoc,
+                      _TEXTO_MODO_RADIO[modo_pago(unidad) if unidad else MODO_APARTE])
+        fila_modo_asoc_layout.addWidget(self._fila_modo_asoc_radio)
         fila_modo_asoc_layout.addStretch()
         layout.addWidget(self.fila_modo_asoc)
 
@@ -1079,8 +1143,7 @@ class DialogoUnidad(QDialog):
         self._actualizar_tipo()
 
     def _tipo(self):
-        indice = self.combo_tipo.currentIndex()
-        return TIPOS[indice] if indice >= 0 else DEPTO
+        return _TIPOS_POR_NOMBRE.get(_radio_seleccionado(self._botones_tipo), DEPTO)
 
     def _actualizar_tipo(self):
         tipo = self._tipo()
@@ -1095,12 +1158,18 @@ class DialogoUnidad(QDialog):
         self.frame_asociadas.setVisible(tipo == DEPTO)
         self.fila_modo_asoc.setVisible(asociable)
         self._actualizar_junto_asoc()
+        # al tildar/destildar frame_asociadas (bloque grande) cambia mucho el contenido, pero la
+        # ventana no se achica ni agranda sola: sin esto, el layout reparte el espacio que sobra
+        # o falta como huecos entre los campos en vez de ajustar el tamaño de la ventana.
+        self.layout().activate()
+        self.adjustSize()
 
     def _actualizar_junto_asoc(self):
         con_depto = bool(self._ids_deptos.get(self.combo_depto.currentText(), ""))
-        self.combo_modo_asoc.setEnabled(con_depto)
+        for boton in self._botones_modo_asoc.values():
+            boton.setEnabled(con_depto)
         if not con_depto:
-            self.combo_modo_asoc.setCurrentText(_TEXTO_MODO[MODO_APARTE])
+            _marcar_radio(self._fila_modo_asoc_radio, self._botones_modo_asoc, _TEXTO_MODO_RADIO[MODO_APARTE])
 
     def _al_elegir_depto(self):
         self._actualizar_junto_asoc()
@@ -1127,21 +1196,20 @@ class DialogoUnidad(QDialog):
 
     def _mostrar_modo_item(self):
         fila = self.lista_asociadas.currentRow()
-        self.combo_modo_item.blockSignals(True)
-        self.combo_modo_item.setCurrentText(_TEXTO_MODO[self._items[fila]["modo"]] if fila >= 0 else "")
-        self.combo_modo_item.blockSignals(False)
+        texto = _TEXTO_MODO_RADIO[self._items[fila]["modo"]] if fila >= 0 else None
+        _marcar_radio(self._fila_modo_item, self._botones_modo_item, texto)
 
     def _fijar_modo_item(self):
-        """Cambia cómo paga la cochera/baulera elegida en la lista (texto largo del combo)."""
-        texto = self.combo_modo_item.currentText()
+        """Cambia cómo paga la cochera/baulera elegida en la lista."""
+        texto = _radio_seleccionado(self._botones_modo_item)
         if not texto:
             return
         fila = self.lista_asociadas.currentRow()
         if fila < 0:
             QMessageBox.information(self, "Cómo paga", "Elegí primero la cochera o baulera de la lista.")
-            self.combo_modo_item.setCurrentText("")
+            _marcar_radio(self._fila_modo_item, self._botones_modo_item, None)
             return
-        self._items[fila]["modo"] = _CODIGO_MODO[texto]
+        self._items[fila]["modo"] = _CODIGO_MODO_RADIO[texto]
         self.lista_asociadas.item(fila).setText(self._texto_item(self._items[fila]))
 
     def _nueva_asociada(self, tipo):
@@ -1216,12 +1284,19 @@ class DialogoUnidad(QDialog):
 
         depto_id = self._ids_deptos.get(self.combo_depto.currentText(), "") if tipo in TIPOS_ASOCIABLES else ""
         items = self._items if tipo == DEPTO else []
-        asociadas = [dict(it["datos"], inquilino=inquilino, paga_junto=it["modo"]) for it in items if it["estado"] == "nueva"]
+        asociadas = []
+        for it in items:
+            if it["estado"] != "nueva":
+                continue
+            datos_asoc = dict(it["datos"], inquilino=inquilino, paga_junto=it["modo"])
+            if it["modo"] == MODO_TOTAL:   # incluida en el total: no lleva celda propia
+                datos_asoc["celda"] = ""
+            asociadas.append(datos_asoc)
         a_vincular = [it for it in items if it["estado"] == "vincular"]
         a_cambiar = [it for it in items if it["estado"] == "actual" and it["modo"] != it["modo_orig"]]
         uf, dueno = self.campo_uf.text().strip(), self.campo_dueno.text().strip()
         # solo una cochera/baulera de un depto tiene "cómo paga"; una incluida en el total no lleva celda propia
-        modo = _CODIGO_MODO[self.combo_modo_asoc.currentText()] if depto_id else MODO_APARTE
+        modo = _CODIGO_MODO_RADIO[_radio_seleccionado(self._botones_modo_asoc)] if depto_id else MODO_APARTE
         if modo == MODO_TOTAL:
             celda = ""
 
@@ -2002,11 +2077,9 @@ class DialogoConfiguracionSMTP(QDialog):
 
         fila_tls = QHBoxLayout()
         fila_tls.addWidget(QLabel("Seguridad de la conexión:"))
-        self.combo_tls = QComboBox()
-        self.combo_tls.addItems(["STARTTLS", "SSL", "Ninguna"])
-        self.combo_tls.setCurrentText(datos.get("tls") or "STARTTLS")
-        _estilizar_combo(self.combo_tls)
-        fila_tls.addWidget(self.combo_tls)
+        self._fila_tls, self._botones_tls = _crear_grupo_radio(["STARTTLS", "SSL", "Ninguna"])
+        _marcar_radio(self._fila_tls, self._botones_tls, datos.get("tls") or "STARTTLS")
+        fila_tls.addWidget(self._fila_tls)
         layout.addLayout(fila_tls)
 
         self.lbl_estado = QLabel("")
@@ -2029,7 +2102,7 @@ class DialogoConfiguracionSMTP(QDialog):
 
     def _leer(self):
         datos = {clave: campo.text().strip() for clave, campo in self.campos.items()}
-        datos["tls"] = self.combo_tls.currentText()
+        datos["tls"] = _radio_seleccionado(self._botones_tls) or "STARTTLS"
         return datos
 
     def _probar(self):
@@ -2379,7 +2452,7 @@ class VentanaRegistroEnvios(QDialog):
         cuerpo.setSpacing(0)
         layout_externo.addLayout(cuerpo, 1)
 
-        self._nombres_sidebar = ["(Todos)"] + database.get_nombres_edificios()
+        self._nombres_sidebar = database.get_nombres_edificios()
         self.lista_edificios = _crear_sidebar_edificios(cuerpo, self._nombres_sidebar, self._recargar)
 
         contenedor = QWidget()
@@ -2416,20 +2489,21 @@ class VentanaRegistroEnvios(QDialog):
         layout.addLayout(pie)
 
         self._filas_por_fila = {}
-        self.lista_edificios.blockSignals(True)
-        self.lista_edificios.setCurrentRow(0)   # siempre arranca en "(Todos)"
-        self.lista_edificios.blockSignals(False)
+        if self.lista_edificios.count():
+            self.lista_edificios.blockSignals(True)
+            self.lista_edificios.setCurrentRow(0)
+            self.lista_edificios.blockSignals(False)
         self._recargar()
 
     def _filtro_actual(self):
         item = self.lista_edificios.currentItem()
-        return item.text() if item else "(Todos)"
+        return item.text() if item else ""
 
     def _recargar(self):
         self.tabla.setRowCount(0)
         self._filas_por_fila = {}
         filtro = self._filtro_actual()
-        registro = correo.get_mails_enviados(None if filtro in ("", "(Todos)") else filtro)
+        registro = correo.get_mails_enviados(filtro or None)
         self.tabla.setRowCount(len(registro))
         for fila, r in enumerate(registro):
             valores = (r.get("fecha", ""), r.get("edificio", ""), r.get("numero_recibo", ""), r.get("unidad", ""),
@@ -2711,7 +2785,7 @@ class VentanaHistorial(_AbreRecibosMixin, _EnviarPorMailMixin, QDialog):
         layout_externo.addLayout(cuerpo, 1)
 
         self.lista_edificios = _crear_sidebar_edificios(
-            cuerpo, ["(Todos)"] + database.get_nombres_edificios(), self._recargar)
+            cuerpo, database.get_nombres_edificios(), self._recargar)
 
         contenedor = QWidget()
         layout = QVBoxLayout(contenedor)
@@ -2759,14 +2833,15 @@ class VentanaHistorial(_AbreRecibosMixin, _EnviarPorMailMixin, QDialog):
         self._archivo_por_fila = {}
         self._filas_por_fila = {}
         self._casillas_por_fila = {}
-        self.lista_edificios.blockSignals(True)
-        self.lista_edificios.setCurrentRow(0)
-        self.lista_edificios.blockSignals(False)
+        if self.lista_edificios.count():
+            self.lista_edificios.blockSignals(True)
+            self.lista_edificios.setCurrentRow(0)
+            self.lista_edificios.blockSignals(False)
         self._recargar()
 
     def _filtro_actual(self):
         item = self.lista_edificios.currentItem()
-        return item.text() if item else "(Todos)"
+        return item.text() if item else ""
 
     def _crear_casilla_mail(self):
         contenedor = QWidget()
@@ -2789,7 +2864,7 @@ class VentanaHistorial(_AbreRecibosMixin, _EnviarPorMailMixin, QDialog):
         filtro = self._filtro_actual()
         historial = database.get_historial()
         historial.sort(key=lambda r: r.get("numero_recibo", ""), reverse=True)
-        historial = [r for r in historial if filtro in ("", "(Todos)") or r.get("edificio") == filtro]
+        historial = [r for r in historial if not filtro or r.get("edificio") == filtro]
 
         self.tabla.setRowCount(len(historial))
         for fila, r in enumerate(historial):
