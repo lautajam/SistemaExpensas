@@ -18,7 +18,7 @@ Qué va en cada lugar del recibo (lo que varía en cada recibo sale de un marcad
     Recibí de              {RECIBI_DE}.-
     Frase                  {FRASE_PAGO}
     Importe                Importe abonado: ${IMPORTE}.-      (Pesos {IMPORTE_LETRAS})
-    Firma                  {FIRMA} sobre la línea «Firma»
+    Firma                  {FIRMA} sobre la línea
     Pie                    {ADMIN_NOMBRE} | C.U.I.T.: {ADMIN_CUIT} | RPAC: {ADMIN_RPAC}
                            Tel: {INMOBILIARIA_TELEFONO} | Email: {INMOBILIARIA_EMAIL}
 """
@@ -157,7 +157,7 @@ def texto_uf(u, agrupadas=()):
 
 # Estado de la planilla (en minúsculas) -> frase que va sobre el importe.
 FRASE_PAGO_POR_ESTADO = {
-    "total": "El pago total de las expensas del mes correspondiente, libre de deuda:",
+    "total": "El pago total de las expensas del mes correspondiente -sin deuda-:",
     "a cta": "El pago a cuenta de las expensas indicadas para el mes correspondiente:",
     "parcial": "El pago a cuenta de las expensas indicadas para el mes correspondiente:",
     "deuda": "El pago de la deuda de expensas de meses anteriores:",

@@ -421,7 +421,7 @@ También permite cargar el **logo** y la **firma digital** (PNG o JPG, con vista
 previa) y quitarlos. Se guardan como `configuracion/logo.png` y
 `configuracion/firma.png`, se incluyen en la copia de seguridad y se reducen
 a 1200 px si son muy grandes. El **logo** se imprime arriba a la derecha del
-recibo y la **firma** sobre la línea «Firma»; si no hay imagen
+recibo y la **firma** sobre la línea; si no hay imagen
 cargada, ese lugar queda en blanco.
 
 ### Envío de recibos por mail
@@ -564,7 +564,7 @@ sistema; el resto es texto fijo.
 | Frase sobre el importe | Depende del estado de pago (ver abajo) |
 | Importe abonado | **Importe** sin decimales si es entero (`$67.000.-`) o con coma (`$67.000,50.-`); en un grupo que paga junto, el total sumado |
 | (Pesos …) | El **importe en letras** (`SESENTA Y SIETE MIL`, con centavos `… CON 50/100`) |
-| Firma | La **firma digital** de la inmobiliaria sobre la línea |
+| Firma | La **firma digital** de la inmobiliaria sobre la línea (sin la palabra «Firma» debajo) |
 | Pie | **Administrador** del consorcio (nombre, CUIT, RPAC) y **teléfono** y **correo** de la inmobiliaria |
 
 Los textos largos (nombres, direcciones, unidades) reducen automáticamente su

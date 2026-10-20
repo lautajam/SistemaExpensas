@@ -99,7 +99,6 @@ td.firma-caja  { width: 34.6%; text-align: center; vertical-align: bottom; heigh
 td.firma-fin   { width: 1.9%; }
 table.firma-linea { width: 100%; }
 table.firma-linea td { border-top: 2.4pt solid #000000; font-size: 1pt; line-height: 1pt; height: 1pt; }
-p.firma-texto { font-size: 14.7pt; line-height: 22pt; text-align: center; margin-top: 10pt; }
 
-p.pie1 { font-size: 14.4pt; line-height: 9.4pt; text-align: center; margin-top: 12pt; }
+p.pie1 { font-size: 14.4pt; line-height: 9.4pt; text-align: center; margin-top: 22pt; }
 p.pie2 { font-size: 18.7pt; line-height: 19pt; text-align: center; }
