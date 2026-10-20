@@ -3524,7 +3524,7 @@ class App(QMainWindow):
         barra_layout.setContentsMargins(24, 16, 24, 16)
 
         textos = QVBoxLayout()
-        titulo = QLabel("Sistema Recibo de Expensas")
+        titulo = QLabel("Recibo de Expensas")
         titulo.setObjectName("titulo")
         textos.addWidget(titulo)
         barra_layout.addLayout(textos)

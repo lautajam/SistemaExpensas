@@ -72,5 +72,5 @@ MESES_ES = [
     "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
 ]
 
-APP_TITULO = "Sistema Recibo de Expensas - Administración de Consorcios"
+APP_TITULO = "Sistema Recibo de Expensas"
 APP_VERSION = "1.0"
