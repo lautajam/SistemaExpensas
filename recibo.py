@@ -8,7 +8,7 @@ la tipografía que se usa para medir textos.
 
 Qué va en cada lugar del recibo (lo que varía en cada recibo sale de un marcador; el resto es texto fijo):
 
-    Encabezado izquierdo   Consorcio de Propietarios sitio en la calle {EDIFICIO_UBICACION}
+    Encabezado izquierdo   Consorcio de Propietarios sito en la calle {EDIFICIO_UBICACION}
                            C.U.I.T.: {EDIFICIO_CUIT}.-  (si el edificio no tiene CUIT, esa línea se
                            quita y el texto del consorcio se agranda y queda centrado)
     Encabezado derecho     {LOGO} / {INMOBILIARIA_NOMBRE} / {INMOBILIARIA_SUBTITULO}
@@ -239,7 +239,7 @@ _ANCHO_LETRAS, _MAX_LETRAS = 528, 17.8
 _ANCHO_IMPORTE, _MAX_IMPORTE = 528, 32.5
 _ANCHO_CONSORCIO = 230          # renglón del texto del consorcio (encabezado izquierdo)
 _ANCHO_INMOBILIARIA = 212       # nombre y subtítulo de la inmobiliaria (encabezado derecho)
-_PRIMERA_LINEA_CONSORCIO = "Consorcio de Propietarios sitio"
+_PRIMERA_LINEA_CONSORCIO = "Consorcio de Propietarios sito"
 _ANCHO_TITULO, _MAX_TITULO = 236, 22.3         # "EXPENSAS: ..." y "GASTO DE: ..." (columna izquierda de los títulos)
 _ANCHO_FECHA_LINEA, _MAX_FECHA_LINEA = 280, 20.4   # "<Localidad>, emisión: <fecha>" (columna derecha de los títulos)
 

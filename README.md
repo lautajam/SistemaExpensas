@@ -553,7 +553,7 @@ sistema; el resto es texto fijo.
 
 | Lugar del recibo | Contenido |
 |---|---|
-| Encabezado izquierdo | «Consorcio de Propietarios sitio en la calle» + **dirección y localidad** del consorcio; «C.U.I.T.:» + **CUIT del consorcio**. Si el edificio **no tiene CUIT**, esa línea se quita y el texto del consorcio se agranda y queda centrado verticalmente |
+| Encabezado izquierdo | «Consorcio de Propietarios sito en la calle» + **dirección y localidad** del consorcio; «C.U.I.T.:» + **CUIT del consorcio**. Si el edificio **no tiene CUIT**, esa línea se quita y el texto del consorcio se agranda y queda centrado verticalmente |
 | Encabezado derecho | **Logo** de la inmobiliaria, su **nombre** y su **subtítulo**, centrados verticalmente |
 | EXPENSAS / GASTO DE | Mes de las expensas y mes de los gastos, abreviados (`SEPT. 26`, `AGO. 26`); «Gasto de» muestra `A CTA.`, `DEUDA` o `NO PAGADO` según el estado de pago |
 | RECIBO DE EXPENSAS N° / FECHA | **Número** de recibo (mínimo 3 dígitos, `001`) y **fecha de emisión** (`24/09/26`) |
