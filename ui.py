@@ -154,7 +154,6 @@ QWidget#barraSuperior {{
     border-bottom: 1px solid {COLOR_BORDE};
 }}
 QLabel#titulo {{ color: {COLOR_TEXTO}; font-size: 26px; font-weight: 700; background: transparent; }}
-QLabel#subtitulo {{ color: {COLOR_TEXTO_SUAVE}; font-size: 13px; background: transparent; }}
 
 QWidget#tarjeta {{
     background-color: {COLOR_TARJETA};
@@ -3525,13 +3524,9 @@ class App(QMainWindow):
         barra_layout.setContentsMargins(24, 16, 24, 16)
 
         textos = QVBoxLayout()
-        textos.setSpacing(2)
         titulo = QLabel("Sistema Recibo de Expensas")
         titulo.setObjectName("titulo")
-        subtitulo = QLabel("Administración de consorcios")
-        subtitulo.setObjectName("subtitulo")
         textos.addWidget(titulo)
-        textos.addWidget(subtitulo)
         barra_layout.addLayout(textos)
         barra_layout.addStretch()
 
