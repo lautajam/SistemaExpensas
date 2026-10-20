@@ -37,7 +37,7 @@
         </td>
         <td class="tit-der">
             <p class="titulo-der">RECIBO DE EXPENSAS N&deg; <span class="dato">{{NUMERO_RECIBO}}</span></p>
-            <p class="titulo-der">FECHA: <span class="dato">{{FECHA_EMISION}}</span></p>
+            <p class="titulo-der" style="font-size: {{TAM_FECHA_LINEA}}pt"><span class="dato">{{FECHA_LINEA}}</span></p>
         </td>
     </tr></table>
 
@@ -62,6 +62,7 @@
     <p class="frase">{{FRASE_PAGO}}</p>
     <p class="importe" style="font-size: {{TAM_IMPORTE}}pt">Importe abonado: $<span class="dato">{{IMPORTE}}</span>.-</p>
     <p class="letras" style="font-size: {{TAM_IMPORTE_LETRAS}}pt">(Pesos <span class="dato">{{IMPORTE_LETRAS}}</span>)</p>
+    <p class="nota-comprobante">(Este recibo debe ser acompa&ntilde;ado del comprobante de la transferencia fechado)</p>
 
     <!-- Firma: la imagen de la firma digital (si esta cargada) va sobre la linea -->
     <table class="firma" cellpadding="0" cellspacing="0"><tr>

@@ -89,10 +89,11 @@ td.rl-c { width: 7%; }
 p.frase   { font-family: opensans; font-weight: bold; font-size: 14.7pt; line-height: 20pt; margin-top: 27.6pt; margin-left: 5pt; }
 p.importe { font-family: opensans; font-weight: bold; font-size: 32.5pt; line-height: 40pt; text-align: right; margin-top: 7.3pt; }
 p.letras  { font-family: opensans; font-weight: bold; text-align: right; line-height: 24pt; margin-top: 3.7pt; }
+p.nota-comprobante { font-family: opensans; font-size: 9pt; line-height: 11pt; text-align: right; margin-top: 2pt; }
 
 /* ---------- Firma y pie ---------- */
 
-table.firma { width: 100%; margin-top: 10pt; }
+table.firma { width: 100%; margin-top: 2pt; }
 td.firma-vacio { width: 63.5%; }
 td.firma-caja  { width: 34.6%; text-align: center; vertical-align: bottom; height: 163pt; }
 td.firma-fin   { width: 1.9%; }
@@ -100,5 +101,5 @@ table.firma-linea { width: 100%; }
 table.firma-linea td { border-top: 2.4pt solid #000000; font-size: 1pt; line-height: 1pt; height: 1pt; }
 p.firma-texto { font-size: 14.7pt; line-height: 22pt; text-align: center; margin-top: 10pt; }
 
-p.pie1 { font-size: 14.4pt; line-height: 9.4pt; text-align: center; margin-top: 19.5pt; }
+p.pie1 { font-size: 14.4pt; line-height: 9.4pt; text-align: center; margin-top: 12pt; }
 p.pie2 { font-size: 18.7pt; line-height: 19pt; text-align: center; }

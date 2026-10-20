@@ -157,7 +157,7 @@ def texto_uf(u, agrupadas=()):
 
 # Estado de la planilla (en minúsculas) -> frase que va sobre el importe.
 FRASE_PAGO_POR_ESTADO = {
-    "total": "El pago total de las expensas indicadas para el mes correspondiente:",
+    "total": "El pago total de las expensas del mes correspondiente, libre de deuda:",
     "a cta": "El pago a cuenta de las expensas indicadas para el mes correspondiente:",
     "parcial": "El pago a cuenta de las expensas indicadas para el mes correspondiente:",
     "deuda": "El pago de la deuda de expensas de meses anteriores:",
@@ -241,6 +241,7 @@ _ANCHO_CONSORCIO = 230          # renglón del texto del consorcio (encabezado i
 _ANCHO_INMOBILIARIA = 212       # nombre y subtítulo de la inmobiliaria (encabezado derecho)
 _PRIMERA_LINEA_CONSORCIO = "Consorcio de Propietarios sitio"
 _ANCHO_TITULO, _MAX_TITULO = 236, 22.3         # "EXPENSAS: ..." y "GASTO DE: ..." (columna izquierda de los títulos)
+_ANCHO_FECHA_LINEA, _MAX_FECHA_LINEA = 280, 20.4   # "<Localidad>, emisión: <fecha>" (columna derecha de los títulos)
 
 
 def armar_datos(*, numero, fecha, edificio, datos_edificio, unidad, agrupadas, expensas_de, gastos_de, estado,
@@ -267,10 +268,15 @@ def armar_datos(*, numero, fecha, edificio, datos_edificio, unidad, agrupadas, e
     bloque_cuit = (f'<p class="cuit">C.U.I.T.: <span class="dato">{html.escape(cuit)}</span>.-</p>' if cuit else "")
     nombre_inmo = (inmobiliaria.get("nombre") or "").strip()
     subtitulo_inmo = (inmobiliaria.get("subtitulo") or "").strip()
+    localidad = (datos_edificio.get("localidad") or "").strip()
+    fecha_emision = fecha_corta(fecha)
+    fecha_linea = f"{localidad}, emisión: {fecha_emision}" if localidad else f"Emisión: {fecha_emision}"
 
     return {
         "NUMERO_RECIBO": f"{int(numero):03d}",
-        "FECHA_EMISION": fecha_corta(fecha),
+        "FECHA_EMISION": fecha_emision,
+        "FECHA_LINEA": fecha_linea,
+        "TAM_FECHA_LINEA": ajustar_fuente(fecha_linea, _ANCHO_FECHA_LINEA, _MAX_FECHA_LINEA, negrita=True),
         "EXPENSAS_DE": abreviar_periodo(expensas_de),
         "GASTOS_DE": abreviar_periodo(gastos_de),
         "TAM_EXPENSAS": ajustar_fuente(f"EXPENSAS: {abreviar_periodo(expensas_de)}", _ANCHO_TITULO, _MAX_TITULO),
