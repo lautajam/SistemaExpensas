@@ -129,7 +129,7 @@ def importe_en_letras(valor):
 # Unidades
 # ---------------------------------------------------------------------------
 
-def _parte_unidad(u):
+def parte_unidad(u):
     """Cómo se nombra una unidad dentro del recuadro: '1ero A', 'Coch. 67', 'Baul 12', 'Local PB 1'."""
     tipo = normalizar_tipo(u.get("tipo"))
     piso = (u.get("piso") or "").strip()
@@ -143,7 +143,7 @@ def _parte_unidad(u):
 
 def texto_unidades(u, agrupadas=()):
     """'1ero A | Coch. 67 | Baul 12': la unidad y, si van en el mismo recibo, sus cocheras y bauleras."""
-    return " | ".join(_parte_unidad(x) for x in [u, *agrupadas])
+    return " | ".join(parte_unidad(x) for x in [u, *agrupadas])
 
 
 def texto_uf(u, agrupadas=()):

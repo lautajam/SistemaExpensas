@@ -31,7 +31,7 @@ from email.message import EmailMessage
 
 import config
 import db
-from recibo import abreviar_periodo
+from recibo import abreviar_periodo, parte_unidad
 
 logger = logging.getLogger(__name__)
 
@@ -181,13 +181,13 @@ def obtener_cc():
 # ---------------------------------------------------------------------------
 
 def _descripcion_unidad(fila_historial):
-    """'1° A, Cochera 6 y Baulera 2' a partir de lo guardado en el historial (piso + unidad)."""
+    """'1° A, Cochera 6 y Baulera 2' a partir de lo guardado en el historial (tipo + piso + unidad)."""
     piso = (fila_historial.get("piso") or "").strip()
     unidad = (fila_historial.get("unidad") or "").strip()      # ej. "A" o "A + Cochera 6 + Baulera 2"
     partes = [p.strip() for p in unidad.split(" + ") if p.strip()]
     if not partes:
         return piso
-    principal = f"{piso} {partes[0]}".strip() if piso else partes[0]
+    principal = parte_unidad({"tipo": fila_historial.get("tipo"), "piso": piso, "unidad": partes[0]})
     resto = partes[1:]
     if not resto:
         return principal
