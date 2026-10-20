@@ -3526,7 +3526,7 @@ class App(QMainWindow):
 
         textos = QVBoxLayout()
         textos.setSpacing(2)
-        titulo = QLabel("Sistema de Expensas")
+        titulo = QLabel("Sistema Recibo de Expensas")
         titulo.setObjectName("titulo")
         subtitulo = QLabel("Administración de consorcios")
         subtitulo.setObjectName("subtitulo")
