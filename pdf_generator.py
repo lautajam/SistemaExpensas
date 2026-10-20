@@ -122,7 +122,7 @@ def generar_pdf_recibo(datos, ruta_salida):
 
     datos = dict(datos)
     datos.setdefault("LOGO", imagen_html(config.IMAGENES_INMOBILIARIA["logo"], 185, 60))
-    datos.setdefault("FIRMA", imagen_html(config.IMAGENES_INMOBILIARIA["firma"], 190, 62))
+    datos.setdefault("FIRMA", imagen_html(config.IMAGENES_INMOBILIARIA["firma"], 180, 120))
 
     for clave, valor in datos.items():
         texto = "" if valor is None else str(valor)
