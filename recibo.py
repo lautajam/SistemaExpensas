@@ -234,9 +234,9 @@ def ajustar_fuente(texto, ancho_pt, max_pt, min_pt=8, negrita=True):
 
 # Ancho útil (pt) de cada lugar de la plantilla y tamaño máximo de letra (los que aparecen en recibo.html)
 _ANCHO_CELDA, _MAX_CELDA = 164, 22
-_ANCHO_RECIBI, _MAX_RECIBI = 318, 29.7
+_ANCHO_RECIBI, _MAX_RECIBI = 318, 22         # mismo tamaño máximo que el nombre del dueño en la tabla
 _ANCHO_LETRAS, _MAX_LETRAS = 528, 17.8
-_ANCHO_IMPORTE, _MAX_IMPORTE = 528, 32.5
+_ANCHO_IMPORTE, _MAX_IMPORTE = 528, 29.3     # 10% más chico que el original (32.5)
 _ANCHO_CONSORCIO = 230          # renglón del texto del consorcio (encabezado izquierdo)
 _ANCHO_INMOBILIARIA = 212       # nombre y subtítulo de la inmobiliaria (encabezado derecho)
 _PRIMERA_LINEA_CONSORCIO = "Consorcio de Propietarios sito"

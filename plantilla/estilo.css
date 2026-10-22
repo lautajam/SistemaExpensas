@@ -55,7 +55,7 @@ table.linea2 td { border-top: 1.4pt solid #000000; font-size: 1pt; line-height: 
 
 /* ---------- Titulos ---------- */
 
-table.titulos { width: 100%; margin-top: 28pt; }
+table.titulos { width: 100%; margin-top: 22pt; }
 td.tit-izq { width: 45%; vertical-align: top; }
 td.tit-der { width: 55%; vertical-align: top; text-align: right; }
 p.titulo-izq { font-family: opensans; font-weight: bold; font-size: 22.3pt; line-height: 31pt; }
@@ -63,7 +63,7 @@ p.titulo-der { font-family: opensans; font-weight: bold; font-size: 20.4pt; line
 
 /* ---------- Tabla de la unidad ---------- */
 
-table.unidad { width: 99.4%; margin-left: 1.6pt; margin-top: 28pt; border-collapse: collapse; }
+table.unidad { width: 99.4%; margin-left: 1.6pt; margin-top: 22pt; border-collapse: collapse; }
 table.unidad th {
     background-color: #1800ad; color: #ffffff; font-family: opensans; font-weight: bold; font-size: 16.7pt;
     text-align: center; border: 0.8pt solid #1800ad; vertical-align: middle;
@@ -80,16 +80,18 @@ table.unidad td {
 
 /* ---------- Recibi de / importe ---------- */
 
-p.recibi { font-family: opensans; font-weight: bold; font-size: 29.7pt; line-height: 36pt; margin-top: 20pt; margin-left: 2pt; }
+p.recibi { font-family: opensans; font-weight: bold; font-size: 22pt; line-height: 27pt; margin-top: 20pt; margin-left: 2pt; }
 table.recibi-linea { width: 100%; }
 table.recibi-linea td { font-size: 1pt; line-height: 1pt; height: 1pt; }
-td.rl-a { width: 29%; }
-td.rl-b { width: 64%; border-top: 3.6pt solid #000000; }
+td.rl-a { width: 21%; }
+td.rl-b { width: 72%; border-top: 3.6pt solid #000000; }
 td.rl-c { width: 7%; }
-p.frase   { font-family: opensans; font-weight: bold; font-size: 14.7pt; line-height: 20pt; margin-top: 27.6pt; margin-left: 5pt; }
-p.importe { font-family: opensans; font-weight: bold; font-size: 32.5pt; line-height: 40pt; text-align: right; margin-top: 7.3pt; }
+p.frase   { font-family: opensans; font-weight: bold; font-size: 14.7pt; line-height: 20pt; margin-top: 22pt; margin-left: 5pt; }
+p.importe { font-family: opensans; font-weight: bold; font-size: 29.3pt; line-height: 36pt; text-align: right; margin-top: 7.3pt; }
 p.letras  { font-family: opensans; font-weight: bold; text-align: right; line-height: 24pt; margin-top: 3.7pt; }
-p.nota-comprobante { font-family: opensans; font-size: 9pt; line-height: 11pt; text-align: right; margin-top: 2pt; }
+p.nota-comprobante { font-family: opensans; font-size: 11pt; line-height: 14pt; text-align: right; margin-top: 3pt; }
+p.nota-acreditacion { font-family: opensans; font-size: 11pt; line-height: 14pt; text-align: left; margin-top: 4pt; }
+span.nota-acreditacion-etiqueta { font-family: opensansbold; font-weight: bold; text-decoration: underline; }
 
 /* ---------- Firma y pie ---------- */
 
