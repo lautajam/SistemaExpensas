@@ -2,15 +2,11 @@
 """
 logging_config.py
 ------------------
-Logging centralizado de la app. Se inicializa una sola vez al arrancar
-(ver main.py) y después cada módulo pide su logger con:
+Configuración centralizada de logging. Se inicializa una única vez al
+arrancar la aplicación (ver main.py); cada módulo obtiene su logger con
+logging.getLogger(__name__).
 
-    import logging
-    logger = logging.getLogger(__name__)
-
-Guarda en datos/logs/app.log, con rotación para que no crezca sin límite.
-Es clave sobre todo para el .exe compilado: ahí no hay consola visible,
-así que sin esto un error se pierde sin dejar rastro.
+Registra en datos/logs/app.log, con rotación de tamaño.
 """
 
 import logging

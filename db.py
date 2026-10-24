@@ -2,15 +2,16 @@
 """
 db.py
 -----
-Base de datos SQLite (datos/expensas.db) que reemplaza, de a poco, los CSV de datos/ y configuracion/.
+Acceso a la base de datos SQLite de la aplicación (datos/expensas.db), que
+reemplaza a los CSV que antes se guardaban en datos/ y configuracion/.
 
-Decisiones:
-- Todas las columnas se guardan como TEXTO, igual que en los CSV: la migración no convierte
-  ni redondea ningún valor.
-- Cada tabla tiene una columna `orden` autoincremental para conservar el orden original de las filas.
-- La migración NO borra los CSV: quedan como respaldo. La base se escribe en un archivo temporal y
-  solo se renombra cuando la verificación de cantidades cuadra; si algo falla, no queda una base a medias.
-- La planilla de pagos (Excel) no es parte de esta base: sigue siendo el archivo de siempre.
+Todas las columnas se guardan como texto, igual que en los CSV de origen:
+la migración no convierte ni redondea ningún valor. Cada tabla tiene una
+columna "orden" autoincremental que conserva el orden original de las
+filas. La migración no elimina los CSV, que quedan como respaldo; la base
+se escribe primero en un archivo temporal y se renombra solo si la
+verificación de cantidades es correcta. La planilla de pagos (Excel) no
+forma parte de esta base.
 """
 
 import csv
@@ -67,7 +68,7 @@ al_crear = None   # función que database.py registra: se llama al crear la base
 
 
 def abrir(ruta=None):
-    """Conexión a la base. Si la base de la app todavía no existe, la crea (importando los CSV viejos)."""
+    """Abre una conexión a la base. Si la base principal todavía no existe, la crea e importa los CSV existentes."""
     principal = _ruta_activa or RUTA_DB
     ruta = ruta or principal
     if ruta == principal and not os.path.isfile(ruta):
@@ -107,7 +108,7 @@ _transaccion = None         # conexión abierta mientras dura un bloque transacc
 
 
 def _conexion():
-    """Conexión para una operación: la de la transacción activa, o una nueva que se cierra al terminar."""
+    """Devuelve la conexión de la transacción activa, o una nueva que se cierra al finalizar la operación."""
     return _transaccion if _transaccion is not None else abrir(_ruta_activa or RUTA_DB)
 
 
@@ -123,7 +124,7 @@ def _usar(conexion, operacion):
 
 
 def leer(tabla):
-    """Filas de la tabla como dicts con los campos originales, en el orden en que se cargaron."""
+    """Devuelve las filas de la tabla como diccionarios, en el orden en que se cargaron."""
     campos = ESQUEMA[tabla][1]
 
     def operacion(con):
@@ -134,7 +135,7 @@ def leer(tabla):
 
 
 def reemplazar(tabla, filas):
-    """Reemplaza todo el contenido de la tabla por 'filas' (solo se guardan los campos de la tabla)."""
+    """Reemplaza todo el contenido de la tabla por 'filas'. Solo se guardan los campos definidos para la tabla."""
     campos = ESQUEMA[tabla][1]
     columnas = ", ".join(f'"{c}"' for c in campos)
     marcas = ", ".join("?" for _ in campos)
@@ -160,7 +161,9 @@ def agregar(tabla, fila):
 
 class transaccion:
     """
-    Agrupa varias operaciones en una sola transacción: si el bloque falla, no se guarda nada.
+    Agrupa varias operaciones de base de datos en una sola transacción. Si el
+    bloque lanza una excepción, no se guarda ningún cambio.
+
         with db.transaccion():
             ...
     """
@@ -182,7 +185,7 @@ class transaccion:
 
 
 def usar_ruta(ruta):
-    """Cambia la base en uso (para pruebas y para restaurar un backup)."""
+    """Cambia la base de datos en uso. Se utiliza en pruebas y al restaurar una copia de seguridad."""
     global _ruta_activa
     _ruta_activa = ruta
 
@@ -193,8 +196,9 @@ TABLAS_SECRETAS = ("maestro", "smtp")
 
 def copiar_sin_secretos(destino):
     """
-    Copia la base (con la API de backup de SQLite, así queda consistente aunque la app esté usándola)
-    a 'destino', y en esa copia vacía las tablas con contraseñas. La base real no se toca.
+    Copia la base a 'destino' mediante la API de backup de SQLite, lo que garantiza una
+    copia consistente aunque la base esté en uso, y vacía las tablas con contraseñas en
+    esa copia. La base original no se modifica.
     """
     origen = abrir(_ruta_activa or RUTA_DB)
     copia = sqlite3.connect(destino)
@@ -210,16 +214,18 @@ def copiar_sin_secretos(destino):
 
 
 def reemplazar_base(ruta_nueva):
-    """Pone 'ruta_nueva' como la base en uso (reemplazo atómico del archivo)."""
+    """Reemplaza de forma atómica el archivo de la base en uso por 'ruta_nueva'."""
     os.replace(ruta_nueva, _ruta_activa or RUTA_DB)
     logger.info("Base de datos reemplazada: %s", _ruta_activa or RUTA_DB)
 
 
 def migrar_desde_csv(ruta=None, origen=None):
     """
-    Crea la base e importa los CSV. 'origen' es {tabla: ruta del CSV}; por defecto, los de la app.
-    Si la base ya existe, no hace nada. Devuelve {tabla: (filas_en_csv, filas_en_base)} si migró,
-    o None si ya existía. Lanza RuntimeError si las cantidades no cuadran (no se crea la base).
+    Crea la base e importa los CSV indicados en 'origen' ({tabla: ruta del CSV}; por defecto, los
+    de la aplicación). Si la base ya existe, no hace nada.
+
+    Devuelve {tabla: (filas_en_csv, filas_en_base)} si se realizó la migración, o None si la base
+    ya existía. Lanza RuntimeError si las cantidades no coinciden, sin crear la base.
     """
     ruta = ruta or RUTA_DB
     if os.path.isfile(ruta):

@@ -2,13 +2,13 @@
 """
 unidades.py
 -----------
-Tipos de unidad (depto, local, cochera, baulera), cómo se nombran y cómo se
-ordenan. Son funciones puras: no leen ni escriben archivos.
+Tipos de unidad (depto, local, cochera, baulera): nomenclatura y orden.
+Contiene únicamente funciones puras, sin lectura ni escritura de archivos.
 
-Relación: un DEPTO puede tener varias (o ninguna) COCHERA y varias (o
-ninguna) BAULERA. Cada cochera/baulera guarda en la columna "depto_id" el id
-del depto al que pertenece (vacío si es independiente). Los LOCALES y los
-deptos nunca pertenecen a otra unidad.
+Un depto puede tener varias cocheras y bauleras, o ninguna. Cada cochera o
+baulera guarda en la columna "depto_id" el id del depto al que pertenece
+(vacío si es independiente). Los locales y los deptos nunca pertenecen a
+otra unidad.
 """
 
 import re
@@ -22,7 +22,7 @@ _ORDEN_TIPO = {DEPTO: 0, LOCAL: 1, COCHERA: 2, BAULERA: 3}
 
 
 def normalizar_tipo(tipo):
-    """Devuelve uno de TIPOS. Alias viejos (COCH, BAU) se convierten; lo desconocido cuenta como DEPTO."""
+    """Devuelve uno de TIPOS. Convierte alias antiguos (COCH, BAU); un valor desconocido se toma como DEPTO."""
     t = str(tipo or "").strip().upper()
     if t in TIPOS:
         return t

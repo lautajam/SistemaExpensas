@@ -3,14 +3,14 @@
 maestro.py
 ----------
 Contraseña maestra que protege las pantallas de administración (Administrar
-edificios/unidades, Mailing y Configuración de la inmobiliaria):
-abrirlas, y cada alta/edición/borrado dentro de ellas, la piden — salvo que el
-"control maestro" esté activo (se activa una vez, desde el menú Administrar, y
-dura hasta que se bloquee o se cierre el programa).
+edificios/unidades, Mailing y Configuración de la inmobiliaria). Se solicita
+para abrirlas y en cada alta, edición o borrado dentro de ellas, salvo que el
+"control maestro" esté activo: se activa una vez desde el menú Administrar y
+permanece así hasta que se bloquee o se cierre el programa.
 
-Se guarda hasheada (PBKDF2-SHA256 con sal aleatoria, sin depender de librerías
-externas) en la tabla "maestro" de la base de datos, junto con una pregunta de
-seguridad para poder restablecerla si se olvida.
+Se guarda hasheada (PBKDF2-SHA256 con sal aleatoria, sin depender de
+librerías externas) en la tabla "maestro" de la base de datos, junto con una
+pregunta de seguridad para poder restablecerla en caso de olvido.
 """
 
 import logging

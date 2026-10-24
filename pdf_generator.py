@@ -4,18 +4,19 @@ pdf_generator.py
 ----------------
 Genera los PDF de los recibos a partir de la plantilla editable ubicada en:
 
-    plantilla/recibo.html   (única plantilla, para todos los tipos de unidad)
+    plantilla/recibo.html   (plantilla única, para todos los tipos de unidad)
     plantilla/estilo.css
     plantilla/fonts/        (tipografía Open Sans)
 
 El motor de renderizado es xhtml2pdf (paquete "xhtml2pdf", módulo "pisa"),
-elegido por ser 100% Python puro: no necesita instalar wkhtmltopdf ni
-librerías del sistema operativo, y empaqueta sin problemas con PyInstaller.
+elegido por ser 100% Python puro: no requiere instalar wkhtmltopdf ni
+librerías del sistema operativo, y se empaqueta sin inconvenientes con
+PyInstaller.
 
-Para modificar el diseño del recibo, basta con editar esos archivos con
-cualquier editor de texto: NO hace falta tocar este archivo ni recompilar el
-.exe. Cada "{{CLAVE}}" del HTML se reemplaza por el valor correspondiente del
-diccionario "datos" (ver recibo.py, que arma ese diccionario).
+El diseño del recibo puede modificarse editando esos archivos directamente,
+sin necesidad de tocar este módulo ni recompilar el ejecutable. Cada
+"{{CLAVE}}" del HTML se reemplaza por el valor correspondiente del
+diccionario "datos" (ver recibo.py, que lo genera).
 """
 
 import html as html_lib
@@ -59,9 +60,10 @@ _FUENTES_REGISTRADAS = False
 
 def _registrar_fuentes():
     """
-    Registra Open Sans (plantilla/fonts) en ReportLab, que es quien dibuja el PDF. Se hace acá
-    y no con @font-face porque xhtml2pdf falla al cargar fuentes por CSS en Windows. Si los
-    archivos no están, el recibo se genera igual con la tipografía por defecto.
+    Registra la tipografía Open Sans (plantilla/fonts) en ReportLab, que es quien dibuja
+    el PDF. Se realiza de esta forma, en lugar de mediante @font-face, porque xhtml2pdf no
+    carga correctamente fuentes definidas por CSS en Windows. Si los archivos de fuente no
+    están presentes, el recibo se genera igual con la tipografía predeterminada.
     """
     global _FUENTES_REGISTRADAS
     if _FUENTES_REGISTRADAS:

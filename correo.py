@@ -2,23 +2,24 @@
 """
 correo.py
 ---------
-Envío de recibos por mail: direcciones de cada unidad (hasta 4: inquilino y dueño),
-configuración SMTP y el registro de qué se mandó.
+Envío de recibos por mail: direcciones de cada unidad (hasta 4: inquilino y
+dueño), configuración SMTP y registro de los envíos realizados.
 
-Los datos viven en la base de datos (ver db.py), en estas tablas:
+Los datos se guardan en la base de datos (ver db.py), en estas tablas:
 
     emails_unidades   una fila por unidad (por su id), con sus 4 direcciones
-    smtp              un solo registro con lo necesario para mandar mails:
+    smtp              un único registro con lo necesario para enviar mails:
                        servidor, puerto, usuario, contraseña y seguridad
-    copia_mail        un mail de copia (CC) para cada envío, que se puede activar o desactivar
+    copia_mail        un mail de copia (CC) para cada envío, activable o desactivable
     plantillas_mail   asunto y cuerpo del mail, personalizados por edificio
-    mails_enviados    un renglón por cada envío (a quién, cuándo, resultado)
+    mails_enviados    un renglón por cada envío (destinatario, fecha, resultado)
 
-El mail se manda "de" el propio usuario SMTP (no hay nombre/mail de remitente aparte:
-en la gran mayoría de los servidores, Gmail incluido, el remitente tiene que ser esa
-misma cuenta). La contraseña se guarda tal cual (no se puede hashear como la maestra:
-hace falta poder usarla para conectarse al servidor); el acceso a esta pantalla ya está
-protegido por la contraseña maestra.
+El mail se envía "de" la propia cuenta SMTP configurada, sin un nombre o
+dirección de remitente aparte, ya que la mayoría de los servidores (Gmail
+incluido) exige que el remitente sea esa misma cuenta. La contraseña se
+guarda sin hashear, a diferencia de la maestra, porque es necesaria para
+autenticar contra el servidor; el acceso a esta pantalla ya está protegido
+por la contraseña maestra.
 """
 
 import logging
@@ -61,8 +62,9 @@ def es_email_valido(texto):
 
 
 def get_emails_unidades(edificio=None):
-    """{unidad_id: {inquilino1, inquilino2, dueno1, dueno2}}. 'edificio' no filtra acá: el CSV
-    no sabe de edificios (va por id de unidad), se filtra afuera contra las unidades del edificio."""
+    """{unidad_id: {inquilino1, inquilino2, dueno1, dueno2}}. El parámetro 'edificio' no filtra
+    acá: la tabla se indexa por id de unidad, sin referencia al edificio; el filtro se aplica
+    afuera, contra las unidades del edificio correspondiente."""
     filas = db.leer("emails_unidades")
     return {f["unidad_id"]: {c: (f.get(c) or "").strip() for c in EMAILS_CAMPOS[1:]} for f in filas if f.get("unidad_id")}
 
@@ -79,8 +81,9 @@ def direcciones_de(unidad_id):
 
 def set_emails_unidades(datos_por_unidad):
     """
-    Guarda de una las direcciones de varias unidades: {unidad_id: {inquilino1, inquilino2,
-    dueno1, dueno2}}. Las unidades que no vienen en 'datos_por_unidad' conservan lo que tenían.
+    Guarda en un solo paso las direcciones de varias unidades: {unidad_id: {inquilino1,
+    inquilino2, dueno1, dueno2}}. Las unidades que no figuran en 'datos_por_unidad' conservan
+    los valores que tenían.
     """
     actuales = get_emails_unidades()
     actuales.update({uid: {c: (v.get(c) or "").strip() for c in EMAILS_CAMPOS[1:]} for uid, v in datos_por_unidad.items()})
@@ -163,7 +166,7 @@ def get_copia():
 
 
 def guardar_copia(email, activa):
-    """Guarda el mail de copia y si está activo. Lanza ValueError si se activa sin un mail válido."""
+    """Guarda el mail de copia y si la copia está activa. Lanza ValueError si se activa sin un mail válido."""
     email = (email or "").strip()
     if activa and not es_email_valido(email):
         raise ValueError("Para activar la copia hace falta un mail válido.")
@@ -290,8 +293,9 @@ def registrar_envio(edificio, fila_historial, destinatario, ok, detalle=""):
 def enviar_recibo(fila_historial, cc=None):
     """
     Manda el recibo de un renglón del historial a todas las direcciones cargadas para su
-    unidad, con copia a 'cc' si se pasa. Devuelve una lista de (destinatario, ok, detalle) —
-    una entrada por cada intento (o un único ("(sin datos)", False, motivo) si no se pudo intentar nada).
+    unidad, con copia a 'cc' si se pasa. Devuelve una lista de (destinatario, ok, detalle):
+    una entrada por cada intento, o una única entrada ("(sin datos)", False, motivo) si no
+    se pudo intentar ningún envío.
     """
     if not existe_smtp():
         return [("(smtp)", False, "No hay una configuración SMTP cargada (Administrar → Mailing → Configuración SMTP).")]

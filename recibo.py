@@ -2,22 +2,24 @@
 """
 recibo.py
 ---------
-Arma los datos que lleva cada recibo (los valores de los marcadores {{CLAVE}} de
-plantilla/recibo.html). Son funciones puras: no leen ni escriben archivos, salvo
-la tipografía que se usa para medir textos.
+Arma los datos de cada recibo: los valores de los marcadores {{CLAVE}} de
+plantilla/recibo.html. Contiene funciones puras que no leen ni escriben
+archivos, salvo la tipografía que se utiliza para medir textos.
 
-Qué va en cada lugar del recibo (lo que varía en cada recibo sale de un marcador; el resto es texto fijo):
+Contenido de cada sección del recibo (lo que varía sale de un marcador; el
+resto es texto fijo):
 
     Encabezado izquierdo   Consorcio de Propietarios sito en la calle {EDIFICIO_UBICACION}
                            C.U.I.T.: {EDIFICIO_CUIT}.-  (si el edificio no tiene CUIT, esa línea se
                            quita y el texto del consorcio se agranda y queda centrado)
     Encabezado derecho     {LOGO} / {INMOBILIARIA_NOMBRE} / {INMOBILIARIA_SUBTITULO}
     Títulos                EXPENSAS: {EXPENSAS_DE}      RECIBO DE EXPENSAS N° {NUMERO_RECIBO}
-                           GASTO DE: {GASTOS_DE}        FECHA: {FECHA_EMISION}
+                           GASTO DE: {GASTOS_DE}        {FECHA_LINEA} (localidad y fecha de emisión)
     Tabla                  Depto-Coch-Local {UNIDADES} | Unidad Funcional {UF} (solo la del depto) | Propietario {PROPIETARIO}
     Recibí de              {RECIBI_DE}.-
     Frase                  {FRASE_PAGO}
     Importe                Importe abonado: ${IMPORTE}.-      (Pesos {IMPORTE_LETRAS})
+    Notas                  Aviso sobre el comprobante de transferencia y sobre la fecha de acreditación
     Firma                  {FIRMA} sobre la línea
     Pie                    {ADMIN_NOMBRE} | C.U.I.T.: {ADMIN_CUIT} | RPAC: {ADMIN_RPAC}
                            Tel: {INMOBILIARIA_TELEFONO} | Email: {INMOBILIARIA_EMAIL}
@@ -47,7 +49,7 @@ def abreviar_periodo(texto):
 
 
 def fecha_corta(fecha):
-    """24/09/26"""
+    """Formato de fecha corta del recibo: 24/09/26."""
     return fecha.strftime("%d/%m/%y")
 
 

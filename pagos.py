@@ -2,28 +2,31 @@
 """
 pagos.py
 --------
-Planillas de pagos: un Excel por edificio en datos/pagos_edificios/, llamado
-"<Nombre_Edificio>_pagos.xlsx". La app lo crea y mantiene ordenado sola
-(una fila por unidad); las personas solo cargan los montos de cada mes.
+Planillas de pagos: un archivo Excel por edificio en datos/pagos_edificios/,
+con el nombre "<Nombre_Edificio>_pagos.xlsx". La aplicación lo crea y
+mantiene ordenado automáticamente (una fila por unidad); el usuario solo
+carga los montos de cada mes.
 
 Diseño de la hoja:
     fila 2:  nombre del edificio
     fila 3:  Tipo unidad | Total a pagar | Monto deuda | Monto pagado | Tipo pago
     fila 4+: una fila por unidad (deptos, locales, cocheras, bauleras), en
              orden de piso y unidad, con cada depto seguido de sus cocheras
-             y bauleras. Sin unidades, la fila 4 tiene igual la fórmula de
-             "Tipo pago" (para poder copiarla)
-    columna H (oculta): id interno de la unidad. Es lo que vincula cada fila
-    con su unidad, aunque cambie el piso/letra o se reordenen las filas.
+             y bauleras. Sin unidades, la fila 4 conserva la fórmula de
+             "Tipo pago" para poder copiarla.
+    columna H (oculta): id interno de la unidad, que vincula cada fila con
+             su unidad aunque cambien el piso o la letra, o se reordenen
+             las filas.
 
-"Tipo pago" es una fórmula de Excel. Para cambiar qué texto se imprime en
-"Gastos de" por cada estado, editar TEXTO_POR_ESTADO.
+"Tipo pago" es una fórmula de Excel. El texto que se imprime en "Gastos de"
+para cada estado se define en TEXTO_POR_ESTADO.
 
-Modo "celdas" (planilla propia con su orden): si alguna unidad del edificio tiene
-asignada una celda (campo "celda", ej. B12), la app NO crea ni modifica la planilla:
-lee el mismo archivo tal cual está. La celda es la del nombre de la unidad y a su
-derecha van Total a pagar, Monto deuda, Monto pagado y Tipo pago. Las unidades sin
-celda no figuran en la planilla (no se puede generar su recibo).
+Modo "celdas" (planilla propia con un orden fijo): si alguna unidad del
+edificio tiene asignada una celda (campo "celda", por ejemplo B12), la
+aplicación no crea ni modifica la planilla, y lee el archivo tal como está.
+La celda corresponde al nombre de la unidad, y a su derecha se ubican Total
+a pagar, Monto deuda, Monto pagado y Tipo pago. Las unidades sin celda no
+figuran en la planilla y no pueden generar su recibo.
 """
 
 import os
@@ -153,8 +156,9 @@ def _leer_existente(ruta):
 
 def _es_ajena(ruta):
     """
-    True si el archivo es un Excel de la persona y no una planilla armada por esta app:
-    la app siempre deja oculta la columna de ids (H) y este no, y además tiene datos.
+    True si el archivo es un Excel del usuario y no una planilla generada por la aplicación:
+    esta siempre deja oculta la columna de ids (H), mientras que el archivo del usuario no,
+    además de tener datos cargados.
     """
     wb = load_workbook(ruta, data_only=False)
     try:
@@ -174,7 +178,7 @@ def _respaldar(ruta):
 
 
 class PlanillaAjena(Exception):
-    """El archivo de la planilla tiene datos que no armó esta app (es el Excel propio de la persona)."""
+    """El archivo de la planilla tiene datos que no generó la aplicación: es un Excel propio del usuario."""
 
 
 def sincronizar_edificio(nombre_edificio, unidades, reemplazar_ajena=False):
@@ -182,9 +186,10 @@ def sincronizar_edificio(nombre_edificio, unidades, reemplazar_ajena=False):
     Crea o actualiza la planilla del edificio para que tenga exactamente una
     fila por unidad, en orden, conservando los montos ya cargados.
     Devuelve True si escribió el archivo. Lanza PermissionError si el archivo
-    está abierto en Excel. Si el archivo es un Excel propio (no lo armó la app) no lo
-    toca y lanza PlanillaAjena, salvo reemplazar_ajena=True: entonces guarda antes una
-    copia «..._respaldo_<fecha>.xlsx» y lo reemplaza.
+    está abierto en Excel. Si el archivo es un Excel propio del usuario (no generado
+    por la aplicación), no lo modifica y lanza PlanillaAjena, salvo que
+    reemplazar_ajena sea True: en ese caso guarda antes una copia
+    «..._respaldo_<fecha>.xlsx» y lo reemplaza.
     """
     ruta = ruta_pagos_edificio(nombre_edificio)
     os.makedirs(config.PAGOS_DIR, exist_ok=True)
@@ -378,11 +383,12 @@ def _leer_por_celdas(ws, unidades):
 def leer_planilla(nombre_edificio, unidades=None):
     """
     Devuelve {id_unidad: {"total", "deuda", "pagado", "estado"}} con lo que está
-    GUARDADO en la planilla del edificio. Si el Excel no guardó el resultado de la
+    guardado en la planilla del edificio. Si el Excel no guardó el resultado de la
     fórmula "Tipo pago", el estado se calcula con la misma lógica. Lanza
     FileNotFoundError si la planilla no existe.
+
     Con 'unidades' (las del edificio) y alguna con celda asignada, lee por celdas (ver
-    el modo "celdas" arriba); las unidades sin celda no figuran en el resultado.
+    el modo "celdas" más arriba); las unidades sin celda no figuran en el resultado.
     """
     ruta = ruta_pagos_edificio(nombre_edificio)
     if not os.path.isfile(ruta):
@@ -435,8 +441,8 @@ def gastos_de_unidad(estados, unidad, mes_anterior):
 def estado_agregado(estados):
     """
     Estado de un grupo que paga todo junto (depto + cochera/baulera): "Total" solo si
-    TODAS las filas dicen Total, "No pagado" si todas dicen No pagado, "Deuda" si todas
-    dicen Deuda; cualquier otra combinación es "A cta.". None si no hay ninguna fila.
+    todas las filas dicen Total, "No pagado" si todas dicen No pagado, "Deuda" si todas
+    dicen Deuda; cualquier otra combinación es "A cta.". Devuelve None si no hay ninguna fila.
     """
     normalizados = [_norm(e) for e in estados if e]
     if not normalizados:

@@ -2,11 +2,10 @@
 """
 config.py
 ---------
-Define todas las rutas de la aplicación de forma RELATIVA a la ubicación
-del ejecutable (o del script, si se corre con Python directamente).
-
-Esto es clave para que, al compilar con PyInstaller, los datos NO queden
-guardados dentro de la carpeta temporal (_MEIPASS) sino al lado del .exe.
+Rutas de la aplicación, definidas en forma relativa a la ubicación del
+ejecutable (o del script, en modo desarrollo). Evita que, al compilar con
+PyInstaller, los datos queden en la carpeta temporal de extracción
+(_MEIPASS) en lugar de junto al ejecutable.
 """
 
 import os

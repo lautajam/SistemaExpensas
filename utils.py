@@ -137,8 +137,8 @@ def mes_anterior_es(hoy=None):
 
 def obtener_periodos(hoy=None):
     """
-    Único punto donde se decide qué períodos lleva el recibo.
-    Devuelve (expensas_de, gastos_de). Hoy: mes corriente y mes anterior.
+    Único punto donde se determinan los períodos que lleva el recibo.
+    Devuelve (expensas_de, gastos_de): actualmente, el mes corriente y el mes anterior.
     """
     return mes_actual_es(hoy), mes_anterior_es(hoy)
 
@@ -158,11 +158,11 @@ def nombre_archivo_recibo(edificio, piso, unidad, periodo, numero_recibo, carpet
                           tipo="DEPTO", depto=""):
     """
     Genera el nombre de archivo del recibo y resuelve conflictos de nombre.
-    Los deptos mantienen el formato de siempre; para local/cochera/baulera se
-    agrega el tipo, y para las que pertenecen a un depto, la etiqueta de ese depto.
-    Si el archivo "natural" ya existe, se le agrega el número de recibo
-    como sufijo para no sobrescribir ni perder el archivo anterior.
-    Devuelve la ruta completa del archivo.
+    Los deptos conservan el formato original; para local, cochera o baulera se
+    agrega el tipo, y si pertenecen a un depto, también la etiqueta de ese depto.
+    Si el nombre de archivo ya existe, se le agrega el número de recibo como
+    sufijo para no sobrescribir el archivo anterior.
+    Devuelve la ruta completa y el nombre del archivo.
     """
     partes = ["recibo_expensas", sanitize_filename(edificio)]
     if str(tipo or "").strip().upper() not in ("", "DEPTO"):
@@ -198,14 +198,11 @@ def abrir_carpeta_en_explorador(ruta):
 
 def abrir_pdf(ruta_absoluta):
     """
-    Abre un PDF con el visor/navegador predeterminado de Windows para
-    archivos .pdf (en la mayoría de las instalaciones actuales de Windows
-    esto es el navegador: Edge, Chrome, etc., si está configurado como
-    visor de PDF por defecto).
+    Abre un PDF con el programa predeterminado de Windows para archivos .pdf.
 
-    Devuelve (True, None) si se pudo abrir, o (False, mensaje) si no,
-    para que quien llama pueda mostrarle al usuario la ruta del archivo
-    como alternativa.
+    Devuelve (True, None) si se pudo abrir, o (False, mensaje) en caso contrario,
+    de modo que quien llama pueda mostrar al usuario la ruta del archivo como
+    alternativa.
     """
     if not ruta_absoluta or not os.path.isfile(ruta_absoluta):
         return False, f"No se encontró el archivo en:\n{ruta_absoluta}"
@@ -227,9 +224,9 @@ def abrir_pdf(ruta_absoluta):
 
 def revelar_en_explorador(ruta_absoluta):
     """
-    Abre el Explorador de Windows mostrando (con el archivo ya
-    seleccionado) la carpeta que lo contiene. Si no es Windows o falla,
-    intenta simplemente abrir la carpeta contenedora.
+    Abre el Explorador de Windows mostrando la carpeta que contiene el archivo,
+    con este ya seleccionado. Si no es Windows o falla, intenta abrir la carpeta
+    contenedora.
     """
     if not ruta_absoluta:
         return False

@@ -2,24 +2,24 @@
 """
 ui.py
 -----
-Toda la interfaz gráfica (PySide6/Qt) de Sistema de Expensas.
+Interfaz gráfica (PySide6/Qt) de Sistema de Expensas.
 
 Contiene:
     - App: ventana principal.
-    - DialogoUnidad: alta/edición de una unidad.
+    - DialogoUnidad: alta y edición de una unidad.
     - DialogoEdificioNuevo: alta de un edificio.
-    - VentanaAdministracion: administrar edificios y unidades.
+    - VentanaAdministracion: administración de edificios y unidades.
     - VentanaConfiguracion: datos de la inmobiliaria.
     - VentanaMails / DialogoConfiguracionSMTP / DialogoPlantillaMail / DialogoCopiaMail: mailing.
     - VentanaHistorial / VentanaRegistroEnvios: historial de recibos y de mails.
     - VentanaAyudaRecibos: guía de uso.
-    - VentanaCargarBackup: restaurar un backup.
+    - VentanaCargarBackup: restauración de una copia de seguridad.
 
 Cualquier error inesperado se captura y se muestra como un mensaje
-comprensible (QMessageBox), nunca como un traceback crudo de Python.
+comprensible (QMessageBox), nunca como un traceback de Python.
 
-No toca config.py, database.py, pagos.py, recibo.py, pdf_generator.py ni
-unidades.py: esta ventana es solo una capa de presentación sobre la misma
+Este módulo no modifica config.py, database.py, pagos.py, recibo.py,
+pdf_generator.py ni unidades.py: es una capa de presentación sobre la misma
 lógica de negocio.
 """
 
@@ -347,10 +347,10 @@ def mostrar_avisos(parent=None):
 
 def requerir_maestro(parent, on_ok, motivo=""):
     """
-    Gate de una acción protegida por la contraseña maestra. Con el control maestro
-    activo llama a on_ok() de una: no pregunta nada. Si todavía no hay contraseña
-    creada, obliga a crear una. Si se cancela o se pone una contraseña incorrecta,
-    no llama a on_ok(): quien invoca no tiene que hacer nada más.
+    Controla el acceso a una acción protegida por la contraseña maestra. Si el control
+    maestro está activo, llama a on_ok() directamente, sin pedir nada. Si todavía no
+    existe una contraseña, obliga a crearla. Si se cancela la operación o se ingresa una
+    contraseña incorrecta, no llama a on_ok(): quien invoca no necesita hacer nada más.
     """
     if maestro.esta_activo():
         on_ok()
@@ -679,8 +679,9 @@ def confirmar_y_borrar(parent, unidad_id, on_borrado=None):
 
 def confirmar_modo_celdas(parent, edificio):
     """
-    Si el edificio todavía no usa celdas, avisa lo que cambia al asignar la primera:
-    la app deja de armar y tocar su planilla y solo la lee tal cual. True si sigue.
+    Si el edificio todavía no usa celdas, advierte sobre el cambio que implica asignar
+    la primera: la aplicación deja de generar y modificar su planilla, y solo la lee tal
+    como está. Devuelve True si se debe continuar.
     """
     if pagos.modo_celdas(database.get_unidades_por_edificio(edificio)):
         return True
@@ -695,10 +696,13 @@ def confirmar_modo_celdas(parent, edificio):
 
 
 def _oscurecer_barra_titulo(widget):
-    """En Windows, pinta la barra de título nativa (donde están minimizar/maximizar/cerrar)
-    en oscuro, para que haga juego con el contenido de la ventana. Sin esto, Windows la
-    dibuja blanca por default, aunque todo lo de adentro sea oscuro. No hace nada si falla
-    (ej. versión de Windows vieja): la app sigue andando igual, solo queda la barra clara."""
+    """
+    En Windows, pinta de oscuro la barra de título nativa (donde están los botones de
+    minimizar, maximizar y cerrar), para que sea consistente con el resto de la ventana.
+    Sin esto, Windows la dibuja blanca de forma predeterminada, aunque el contenido sea
+    oscuro. Si falla (por ejemplo, en una versión antigua de Windows), no hace nada: la
+    aplicación sigue funcionando igual, solo queda la barra clara.
+    """
     if sys.platform != "win32":
         return
     try:
@@ -714,8 +718,9 @@ def _oscurecer_barra_titulo(widget):
 
 
 class _OscurecedorBarraTitulo(QObject):
-    """Filtro de eventos de toda la app: apenas se muestra una ventana nueva (la principal
-    o cualquier diálogo), le oscurece la barra de título. Se instala una sola vez."""
+    """Filtro de eventos de la aplicación que oscurece la barra de título de toda
+    ventana nueva (la principal o cualquier diálogo) en cuanto se muestra. Se instala
+    una única vez."""
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Show and isinstance(obj, QWidget) and obj.isWindow():
@@ -725,8 +730,8 @@ class _OscurecedorBarraTitulo(QObject):
 
 def _estilizar_combo(combo):
     """Aplica el mismo estilo oscuro (con hover azul) al desplegable de cualquier QComboBox.
-    Hace falta ponerlo por instancia: Fusion pinta el popup de un QComboBox con QPalette.Highlight
-    y no respeta el ::item:hover del QSS global."""
+    Debe aplicarse a cada instancia: Fusion pinta el popup de un QComboBox con
+    QPalette.Highlight y no respeta el ::item:hover del QSS global."""
     vista = combo.view()
     vista.setMouseTracking(True)
     vista.setStyleSheet(f"""
@@ -756,9 +761,9 @@ def _estilizar_combo(combo):
 
 
 def _crear_sidebar_edificios(cuerpo, nombres, al_cambiar):
-    """Panel lateral fijo con la lista de edificios (QListWidget) para elegir/filtrar por uno,
-    igual que en la ventana principal: a diferencia de un QComboBox desplegable, el hover
-    funciona de forma confiable."""
+    """Panel lateral fijo con la lista de edificios (QListWidget) para elegir o filtrar
+    por uno, igual que en la ventana principal: a diferencia de un QComboBox desplegable,
+    el hover funciona de forma confiable."""
     sidebar = QWidget()
     sidebar.setObjectName("sidebar")
     sidebar.setFixedWidth(220)
@@ -781,11 +786,12 @@ def _crear_sidebar_edificios(cuerpo, nombres, al_cambiar):
 
 
 def _crear_grupo_radio(opciones, al_cambiar=None, vertical=False, permitir_ninguna=False):
-    """Fila (o columna) de QRadioButton excluyentes entre sí: todas las opciones quedan
+    """Fila (o columna) de QRadioButton mutuamente excluyentes: todas las opciones quedan
     escritas y a la vista, sin necesidad de desplegar nada para elegir una.
-    permitir_ninguna=True habilita un estado inicial sin nada tildado (un QButtonGroup
-    exclusivo de Qt no deja volver a 'ninguna' una vez que se tildó una), haciendo la
-    exclusividad a mano en vez de con QButtonGroup.setExclusive."""
+    permitir_ninguna=True habilita un estado inicial sin ninguna opción marcada (un
+    QButtonGroup exclusivo de Qt no permite volver a 'ninguna' una vez marcada una
+    opción); en ese caso, la exclusividad se gestiona manualmente en lugar de con
+    QButtonGroup.setExclusive."""
     contenedor = QWidget()
     contenedor.setStyleSheet("background: transparent;")
     disposicion = QVBoxLayout(contenedor) if vertical else QHBoxLayout(contenedor)
@@ -857,7 +863,7 @@ _TIPOS_POR_NOMBRE = {nombre_tipo(t): t for t in TIPOS}
 # ===========================================================================
 
 class DialogoAsociada(QDialog):
-    """Mini formulario para sumar una cochera o baulera a un depto."""
+    """Formulario breve para sumar una cochera o baulera a un depto."""
 
     def __init__(self, parent, tipo, on_agregar):
         super().__init__(parent)
@@ -2043,7 +2049,7 @@ class VentanaConfiguracion(QDialog):
 # ===========================================================================
 
 class DialogoConfiguracionSMTP(QDialog):
-    """Lo mínimo para poder mandar los recibos por mail: servidor, puerto, usuario y contraseña."""
+    """Datos mínimos necesarios para enviar los recibos por mail: servidor, puerto, usuario y contraseña."""
 
     def __init__(self, parent, on_guardado=None):
         super().__init__(parent)
@@ -2632,7 +2638,7 @@ def _reconstruir_datos_pdf(r):
 
 
 class _AbreRecibosMixin:
-    """Abrir el PDF de la fila seleccionada (self.tabla / self._archivo_por_fila) o mostrarlo en su carpeta."""
+    """Mixin que permite abrir el PDF de la fila seleccionada (self.tabla / self._archivo_por_fila) o mostrarlo en su carpeta."""
 
     def _fila_seleccionada(self):
         filas = self.tabla.selectionModel().selectedRows()
@@ -2707,9 +2713,10 @@ class _AbreRecibosMixin:
 
 class _EnviarPorMailMixin:
     """
-    Checkbox de selección (columna 'sel') + Seleccionar todas/Quitar todas + Enviar por mail,
-    para una tabla del historial. Necesita self.tabla, self._casillas_por_fila (fila -> QCheckBox)
-    y self._filas_por_fila (fila -> fila del historial, tal como la devuelve database.get_historial()).
+    Agrega a una tabla del historial una casilla de selección (columna 'sel'), los botones
+    Seleccionar todas / Quitar todas, y Enviar por mail. Requiere self.tabla,
+    self._casillas_por_fila (fila -> QCheckBox) y self._filas_por_fila (fila -> fila del
+    historial, tal como la devuelve database.get_historial()).
     """
 
     def _seleccionar_todas_mail(self):
@@ -3007,9 +3014,9 @@ class VentanaRecibosGenerados(_AbreRecibosMixin, _EnviarPorMailMixin, QDialog):
 # ===========================================================================
 
 class VentanaAyudaRecibos(QDialog):
-    """Guía de cómo usar el programa para generar los recibos y enviarlos por mail (día a día,
-    no incluye la parte de Administrar). Con ejemplos armados como se verían en pantalla: la
-    tabla de la pantalla principal y la planilla de pagos."""
+    """Guía de uso del programa para generar recibos y enviarlos por mail en el uso
+    cotidiano (no incluye las funciones de Administrar), con ejemplos de cómo se ven
+    en pantalla la tabla principal y la planilla de pagos."""
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -3226,7 +3233,7 @@ class VentanaAyudaRecibos(QDialog):
 # ===========================================================================
 
 class VentanaCargarBackup(QDialog):
-    """Elige un backup (de backups/ o cualquier .zip) y lo carga, reemplazando los datos actuales."""
+    """Permite elegir un backup (de backups/ o cualquier .zip) y cargarlo, reemplazando los datos actuales."""
 
     def __init__(self, parent):
         super().__init__(parent)

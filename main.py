@@ -4,11 +4,11 @@ main.py
 -------
 Punto de entrada de Sistema de Expensas.
 
-Se encarga de:
-    1. Asegurar que exista toda la estructura de datos necesaria.
-    2. Lanzar la interfaz gráfica.
-    3. Capturar cualquier error fatal para mostrarlo de forma comprensible
-       en vez de dejar que la aplicación se cierre con un traceback crudo.
+Realiza las siguientes tareas:
+    1. Asegura que exista toda la estructura de datos necesaria.
+    2. Inicia la interfaz gráfica.
+    3. Captura cualquier error fatal y lo muestra de forma comprensible,
+       en lugar de dejar que la aplicación se cierre con un traceback.
 """
 
 import logging
@@ -62,8 +62,11 @@ def main():
 
 
 def _loguear_error_no_manejado(exc_type, exc, tb):
-    """Qt no interrumpe la app si un callback (botón, evento, etc.) tira una excepción sin
-    capturarla; por default solo se imprime a stderr y en el .exe eso se pierde."""
+    """
+    Registra los errores no controlados que ocurren en un callback de la interfaz (botón,
+    evento, etc.). Qt no interrumpe la aplicación en ese caso: por omisión, el error solo
+    se imprime en stderr, que en el .exe compilado no es visible.
+    """
     logger.error("Error no manejado en un callback de la interfaz", exc_info=(exc_type, exc, tb))
 
 

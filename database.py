@@ -2,14 +2,13 @@
 """
 database.py
 -----------
-Toda la persistencia de la aplicación vive acá, usando archivos CSV planos
-(elegido deliberadamente en vez de SQLite para que el usuario pueda abrir
-y revisar los archivos directamente con Excel si lo necesita).
+Capa de persistencia de la aplicación: edificios, unidades, numeración de
+recibos, historial, configuración de la inmobiliaria, preferencias y copias
+de seguridad. Los datos se guardan en la base SQLite (ver db.py); este
+módulo además exporta a CSV los edificios archivados.
 
-Se usa codificación UTF-8 con BOM ("utf-8-sig") al CREAR los archivos, para
-que Excel en Windows interprete correctamente tildes y "ñ". Al ANEXAR filas
-se usa UTF-8 sin BOM (el BOM ya quedó al principio del archivo; escribirlo
-de nuevo en medio del archivo lo corrompería).
+Los archivos CSV se escriben en codificación UTF-8 con BOM ("utf-8-sig")
+para que Excel en Windows interprete correctamente las tildes y la letra "ñ".
 """
 
 import csv
@@ -135,8 +134,8 @@ INMOBILIARIA_CAMPOS = ["nombre", "subtitulo", "direccion", "telefono", "email"]
 
 def _sembrar_ejemplos_faltantes():
     """
-    Al crear la base por primera vez: si no había CSV de edificios, unidades o inmobiliaria, carga
-    los datos de ejemplo para esas tablas (igual que antes con los archivos).
+    Carga los datos de ejemplo (edificios, unidades e inmobiliaria) si todavía no existen
+    los CSV correspondientes. Se ejecuta al crear la base de datos por primera vez.
     """
     if not os.path.exists(config.EDIFICIOS_CSV):
         edificios_ejemplo = [
@@ -230,12 +229,13 @@ def _reemplazar_prefijo_archivo(archivo, carpeta_vieja, carpeta_nueva):
 
 def update_edificio(nombre_actual, **datos):
     """
-    Guarda los datos del consorcio (nombre, dirección, localidad, cuit y datos del
-    administrador). Si cambia el nombre, actualiza en cascada las unidades, la
+    Guarda los datos del consorcio: nombre, dirección, localidad, CUIT y datos del
+    administrador. Si cambia el nombre, actualiza en cascada las unidades, la
     numeración y el historial de recibos, y renombra la carpeta de recibos y la
-    planilla de pagos. Si algo falla, deja todo como estaba.
-    Devuelve el nombre resultante. Lanza ValueError (datos inválidos) o
-    PermissionError (hay archivos abiertos que impiden el cambio de nombre).
+    planilla de pagos; si alguna operación falla, revierte los cambios realizados.
+
+    Devuelve el nombre resultante. Lanza ValueError si los datos son inválidos, o
+    PermissionError si hay archivos abiertos que impiden el cambio de nombre.
     """
     edificios = get_edificios()
     edificio = next((e for e in edificios if e["nombre"] == nombre_actual), None)
@@ -309,7 +309,8 @@ def update_edificio(nombre_actual, **datos):
 
 
 def resumen_edificio(nombre):
-    """Cuánto tiene un edificio: {"unidades", "recibos" (en el historial), "pdfs" (en su carpeta), "planilla"}."""
+    """Devuelve un resumen del edificio: cantidad de unidades, de recibos en el historial,
+    de PDF en su carpeta, y si existe su planilla de pagos."""
     carpeta = carpeta_edificio(nombre)
     pdfs = sum(1 for _r, _d, archivos in os.walk(carpeta) for a in archivos if a.lower().endswith(".pdf")) \
         if os.path.isdir(carpeta) else 0
@@ -332,11 +333,13 @@ def _archivos_planilla(nombre):
 
 def delete_edificio(nombre):
     """
-    Borra un edificio de la app SIN perder nada: sus unidades, numeración, historial, la
-    carpeta de recibos PDF y la planilla de pagos se guardan en
-    datos/edificios_borrados/<nombre>_<fecha>/ (para recuperarlos a mano).
-    Devuelve la carpeta de archivo. Lanza ValueError si no existe y PermissionError si hay
-    archivos abiertos (planilla en Excel o algún PDF); en cualquier fallo deja todo como estaba.
+    Da de baja un edificio sin eliminar su información: las unidades, la numeración, el
+    historial, la carpeta de recibos en PDF y la planilla de pagos se mueven a
+    datos/edificios_borrados/<nombre>_<fecha>/, desde donde pueden recuperarse a mano.
+
+    Devuelve la carpeta de archivo. Lanza ValueError si el edificio no existe, o
+    PermissionError si hay archivos abiertos (la planilla en Excel o algún PDF); ante
+    cualquier otro fallo, revierte los cambios realizados.
     """
     edificio = get_edificio(nombre)
     if edificio is None:
@@ -657,8 +660,8 @@ def get_ultimo_numero(edificio_nombre):
 
 def get_next_numero(edificio_nombre):
     """
-    Incrementa y PERSISTE de inmediato el número de recibo del edificio dado.
-    Se debe llamar una vez por cada recibo efectivamente generado.
+    Incrementa y guarda de inmediato el número de recibo del edificio indicado.
+    Debe llamarse una única vez por cada recibo efectivamente generado.
     """
     filas = db.leer("numeracion")
     encontrado = None
@@ -724,9 +727,9 @@ def imagen_inmobiliaria(clave):
 
 def guardar_imagen_inmobiliaria(clave, ruta_origen):
     """
-    Lee una imagen (PNG, JPG, GIF, BMP...), la achica si es enorme y la guarda
-    como PNG en configuracion/. Conserva la transparencia si la tiene.
-    Lanza ValueError si el archivo no es una imagen válida.
+    Lee una imagen (PNG, JPG, GIF, BMP, etc.), la reduce de tamaño si excede el máximo
+    permitido y la guarda como PNG en configuracion/, conservando la transparencia si
+    la tiene. Lanza ValueError si el archivo no es una imagen válida.
     """
     from PIL import Image, UnidentifiedImageError
 
